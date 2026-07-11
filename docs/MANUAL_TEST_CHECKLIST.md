@@ -71,3 +71,36 @@ record player + USB audio adapter before calling a build good.
   alert names the right side.
 - [ ] Record Side A, close, reopen next day, record Side B → export numbers
   Side B tracks continuing after Side A.
+
+## Import from USB or Folder
+
+- [ ] Copy a full-side MP3 and a few per-song MP3s onto a USB flash drive
+  with the Crosley (or any recorder).
+- [ ] Mount the drive → it appears under "Removable drives" in the import
+  sheet without clicking refresh; ejecting removes it.
+- [ ] Import the full-side MP3 as Side A → probe shows format/bitrate,
+  detection finds the songs, review/export work end-to-end.
+- [ ] Import the per-song files with "Each file = one track" → order
+  confirmation works, no detection runs, titles come from the files' tags.
+- [ ] Yank the USB drive mid-import → the app stops with the drive-removed
+  message and the project is intact; re-inserting and retrying succeeds.
+- [ ] Import with "Copy files into the project" off (reference mode), then
+  eject the drive and reopen the project → "Recordings Missing" alert.
+- [ ] Try a .pages/.pdf file → rejected as unsupported; try a truncated .wav
+  → rejected as unreadable.
+- [ ] Export an imported-MP3 album with "Keep original encoding" on → export
+  is near-instant and tags are updated.
+
+## Tracklist-guided splitting
+
+- [ ] Paste a real album's tracklist with runtimes into Detect → cuts land in
+  the audible gaps, titles and album fields fill in.
+- [ ] Paste titles without runtimes → the correct number of tracks appears.
+
+## Audacity round trip
+
+- [ ] Record a side in Audacity, add labels at song boundaries, export
+  WAV + labels.
+- [ ] Import both together → tracks appear with the Audacity names, no
+  detection pass.
+- [ ] Drop an .aup3 file → clear "export from Audacity first" message.

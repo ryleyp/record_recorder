@@ -33,7 +33,11 @@ struct ReviewView: View {
         ) {
             sideHeader
 
-            if let analysis = appState.analyses[appState.activeSide],
+            if currentSide?.sourceType == .importedFolder {
+                HelpCallout(
+                    systemImage: "checkmark.circle",
+                    text: "\(appState.activeSide.title) was imported as separate song files, so there are no cut points to review. Rename and reorder the tracks in Album Details.")
+            } else if let analysis = appState.analyses[appState.activeSide],
                currentSide?.hasRecording == true {
                 editor(analysis: analysis)
                 trackList
@@ -79,7 +83,8 @@ struct ReviewView: View {
 
     private func loadPlayback() {
         guard let url = appState.recordingURL(for: appState.activeSide),
-              currentSide?.hasRecording == true else { return }
+              currentSide?.hasRecording == true,
+              currentSide?.sourceType != .importedFolder else { return }
         try? appState.playback.load(url: url)
     }
 

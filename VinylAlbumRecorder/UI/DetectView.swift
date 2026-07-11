@@ -11,10 +11,29 @@ struct DetectView: View {
         ) {
             sidePicker
 
-            if currentSide?.hasRecording != true {
+            if let side = currentSide, !side.importWarnings.isEmpty {
                 HelpCallout(
                     systemImage: "exclamationmark.triangle",
-                    text: "\(appState.activeSide.title) has not been recorded yet. Go to the Record step first.",
+                    text: side.importWarnings.joined(separator: "\n"),
+                    tint: .orange)
+            }
+
+            if currentSide?.sourceType == .importedFolder {
+                HelpCallout(
+                    systemImage: "checkmark.circle",
+                    text: "\(appState.activeSide.title) was imported as \(currentSide?.trackFiles.count ?? 0) separate song files — each file is already one track, so there is nothing to detect. Continue to Album Details to name and order them.")
+                Button {
+                    appState.stage = .metadata
+                } label: {
+                    Label("Continue to Album Details", systemImage: "arrow.right")
+                        .frame(minWidth: 220)
+                }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+            } else if currentSide?.hasRecording != true {
+                HelpCallout(
+                    systemImage: "exclamationmark.triangle",
+                    text: "\(appState.activeSide.title) has not been recorded or imported yet. Go back to Add Music first.",
                     tint: .orange)
             } else if let progress = appState.analysisProgress {
                 VStack(alignment: .leading, spacing: 8) {
@@ -28,6 +47,7 @@ struct DetectView: View {
                 HelpCallout(systemImage: "xmark.octagon", text: error, tint: .red)
             } else if appState.analyses[appState.activeSide] != nil {
                 settingsPanel
+                tracklistPanel
                 resultsPanel
             }
 
@@ -121,6 +141,58 @@ struct DetectView: View {
             }
             .controlSize(.large)
             .buttonStyle(.borderedProminent)
+        }
+        .padding(16)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    @State private var tracklistText = ""
+    @State private var tracklistExpanded = false
+
+    /// Paste the album's tracklist (from the sleeve, Discogs, Wikipedia, …)
+    /// and split using the listed runtimes instead of — or as a guide for —
+    /// pure silence detection.
+    private var tracklistPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation { tracklistExpanded.toggle() }
+            } label: {
+                HStack {
+                    Image(systemName: tracklistExpanded ? "chevron.down" : "chevron.right")
+                    Text("Split using the album's tracklist").font(.headline)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Split using the album's tracklist")
+            .accessibilityHint("Expands a text box for pasting track names and runtimes")
+
+            if tracklistExpanded {
+                Text("Paste one track per line — runtimes make the split far more accurate. Optional “Artist:”, “Album:”, and “Year:” lines fill in the album details too. Example:\n    Artist: Fleetwood Mac\n    1. Dreams 4:14\n    2. Never Going Back Again 2:02")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $tracklistText)
+                    .font(.body.monospaced())
+                    .frame(height: 120)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(.quaternary, lineWidth: 1))
+                    .accessibilityLabel("Tracklist text")
+                HStack {
+                    Button {
+                        appState.applyTracklist(tracklistText, to: appState.activeSide)
+                    } label: {
+                        Label("Split Using Tracklist", systemImage: "list.number")
+                            .frame(minWidth: 180)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(tracklistText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Text("Cuts snap to the quiet gaps nearest each listed runtime; anything off can be fixed in Review Tracks.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(16)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))

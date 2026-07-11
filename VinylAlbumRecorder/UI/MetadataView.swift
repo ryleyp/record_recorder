@@ -152,17 +152,44 @@ struct MetadataView: View {
 
     private func sideSection(label: SideLabel, trackCount: Int) -> some View {
         let numberOffset = startingNumber(for: label)
-        let segments = appState.project?.side(label).segments ?? []
+        let side = appState.project?.side(label)
+        let segments = side?.segments ?? []
+        let isFileBased = side?.sourceType == .importedFolder
         return VStack(alignment: .leading, spacing: 4) {
-            Text(label.title)
-                .font(.subheadline.bold())
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(label.title)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.secondary)
+                if isFileBased {
+                    Text("· imported files — use the arrows to reorder")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
             ForEach(0..<trackCount, id: \.self) { index in
                 let number = numberOffset + index
                 HStack(spacing: 10) {
                     Text(String(format: "%02d", number))
                         .font(.callout.monospaced().bold())
                         .frame(width: 30)
+                    if isFileBased {
+                        Button {
+                            reorder(side: label, from: index, to: index - 1)
+                        } label: {
+                            Image(systemName: "chevron.up")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(index == 0)
+                        .accessibilityLabel("Move track \(number) up")
+                        Button {
+                            reorder(side: label, from: index, to: index + 1)
+                        } label: {
+                            Image(systemName: "chevron.down")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(index == trackCount - 1)
+                        .accessibilityLabel("Move track \(number) down")
+                    }
                     TextField(
                         String(format: "Track %02d", number),
                         text: trackBinding(side: label, index: index, keyPath: \.title))
@@ -182,6 +209,12 @@ struct MetadataView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func reorder(side: SideLabel, from: Int, to: Int) {
+        appState.updateSide(side) { record in
+            record.moveTrackFile(from: from, to: to)
         }
     }
 

@@ -56,3 +56,20 @@
 - No direct iPod writing — by design. The app produces standard MP3 files
   and defers device sync to Finder/Apple Music.
 - UI is English-only in v1.
+
+## Import (added with the import workflow)
+
+- Audacity `.aup3` projects cannot be opened directly (they are SQLite
+  databases with app-specific block encoding). Export audio + labels from
+  Audacity instead; the importer explains this when an .aup3 is dropped.
+- No online album lookup: the app is fully offline by design, so
+  tracklist-guided splitting works by pasting the tracklist (runtimes
+  optional) rather than fetching it from a music database.
+- "Keep original encoding" passthrough applies to per-song imported MP3s.
+  Splitting a single full-side MP3 into tracks inherently requires
+  re-encoding; the export screen warns about the generation loss.
+- Folder scans read embedded track numbers from MP3 ID3 tags; M4A/FLAC tag
+  numbers are not read (those files sort by name), and files inside nested
+  subfolders are not scanned.
+- Reference-mode imports store plain bookmarks (the app is not sandboxed);
+  if a referenced file is deleted the side must be re-imported.

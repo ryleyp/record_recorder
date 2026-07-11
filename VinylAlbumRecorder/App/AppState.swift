@@ -15,7 +15,7 @@ enum WorkflowStage: Int, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
-        case .connect: return "Connect"
+        case .connect: return "Add Music"
         case .levels: return "Set Levels"
         case .record: return "Record"
         case .detect: return "Detect Tracks"
@@ -69,6 +69,15 @@ final class AppState: ObservableObject {
     @Published var analyses: [SideLabel: SideAnalysis] = [:]
     @Published var analysisProgress: Double?
     @Published var analysisError: String?
+    /// Most recent detection result per side (kept for tracklist alignment).
+    @Published var lastDetection: [SideLabel: DetectionResult] = [:]
+
+    // MARK: Import
+
+    let volumeWatcher = VolumeWatcher()
+    @Published var importProgress: Double?
+    @Published var importStatus: String = ""
+    @Published var importError: String?
 
     // MARK: Export
 
@@ -239,6 +248,13 @@ final class AppState: ObservableObject {
         ProjectStore.clearRecoveryMarker(in: packageURL)
         updateSide(side) { record in
             record.hasRecording = true
+            record.sourceType = .liveRecording
+            record.audioFileName = side.recordingFileName
+            record.referencedPath = nil
+            record.referencedBookmark = nil
+            record.sourceInfo = nil
+            record.importWarnings = []
+            record.trackFiles = []
             record.boundaries = []
             record.trimStart = 0
             record.trimEnd = 0
@@ -257,8 +273,8 @@ final class AppState: ObservableObject {
     }
 
     private func refreshSideInfoFromDisk(_ side: SideLabel) {
-        guard let packageURL else { return }
-        let url = ProjectStore.recordingURL(for: side, in: packageURL)
+        guard let packageURL,
+              let url = project?.side(side).audioURL(in: packageURL) else { return }
         guard let file = try? AVAudioFile(forReading: url) else { return }
         let duration = Double(file.length) / file.processingFormat.sampleRate
         updateSide(side) { record in
@@ -270,15 +286,18 @@ final class AppState: ObservableObject {
 
     // MARK: - Analysis & detection
 
+    /// Resolves the playable/analyzable audio for a single-file side
+    /// (live recording or imported file; nil for per-file track imports).
     func recordingURL(for side: SideLabel) -> URL? {
-        guard let packageURL else { return nil }
-        return ProjectStore.recordingURL(for: side, in: packageURL)
+        guard let packageURL, let project else { return nil }
+        return project.side(side).audioURL(in: packageURL)
     }
 
     /// Analyzes the side's audio (waveform + envelope) if not already cached.
     func ensureAnalysis(for side: SideLabel) {
         guard analyses[side] == nil,
               analysisProgress == nil,
+              project?.side(side).sourceType != .importedFolder,
               let url = recordingURL(for: side),
               project?.side(side).hasRecording == true else { return }
         analysisProgress = 0
@@ -313,8 +332,10 @@ final class AppState: ObservableObject {
     /// Runs the detector on the cached analysis and installs the results.
     func runDetection(for side: SideLabel) {
         guard let analysis = analyses[side], var project else { return }
+        guard project.side(side).sourceType != .importedFolder else { return }
         let settings = project.side(side).detectionSettings
         let result = TrackDetector.detect(envelope: analysis.envelope, settings: settings)
+        lastDetection[side] = result
         project.updateSide(side) { record in
             record.boundaries = result.boundaries
             record.trimStart = result.suggestedTrimStart

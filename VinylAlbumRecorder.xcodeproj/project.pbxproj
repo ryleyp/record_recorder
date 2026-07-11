@@ -24,19 +24,11 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		AA00000000000000000000G1 /* VinylAlbumRecorder */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
 			path = VinylAlbumRecorder;
 			sourceTree = "<group>";
 		};
 		AA00000000000000000000G2 /* VinylAlbumRecorderTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
 			path = VinylAlbumRecorderTests;
 			sourceTree = "<group>";
 		};
@@ -351,7 +343,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.ryleypriddy.VinylAlbumRecorder;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "VinylAlbumRecorder/Support/BridgingHeader.h";
+				SWIFT_OBJC_BRIDGING_HEADER = VinylAlbumRecorder/Support/BridgingHeader.h;
 			};
 			name = Debug;
 		};
@@ -383,7 +375,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.ryleypriddy.VinylAlbumRecorder;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "VinylAlbumRecorder/Support/BridgingHeader.h";
+				SWIFT_OBJC_BRIDGING_HEADER = VinylAlbumRecorder/Support/BridgingHeader.h;
 			};
 			name = Release;
 		};

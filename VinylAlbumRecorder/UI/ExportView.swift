@@ -110,6 +110,21 @@ struct ExportView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            if hasImportedMP3Tracks {
+                Toggle(isOn: exportBinding(\.keepOriginalEncoding)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Keep original encoding for imported MP3 tracks")
+                        Text("Copies the imported MP3s' audio unchanged and only rewrites the tags — no quality loss. Turn off to re-encode everything at the chosen bitrate.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+            }
+            if let warning = reencodeWarning {
+                HelpCallout(systemImage: "exclamationmark.triangle", text: warning, tint: .orange)
+            }
+
             Toggle(isOn: exportBinding(\.normalizePeaks)) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Gentle peak normalization")
@@ -192,6 +207,35 @@ struct ExportView: View {
     }
 
     // MARK: Helpers
+
+    /// Any imported side made of individual MP3 files (passthrough-eligible).
+    private var hasImportedMP3Tracks: Bool {
+        appState.project?.sides.contains { side in
+            side.hasRecording && side.sourceType == .importedFolder
+                && side.trackFiles.contains { $0.info?.isMP3 == true }
+        } ?? false
+    }
+
+    /// Explains when MP3 → MP3 re-encoding (generation loss) will happen.
+    private var reencodeWarning: String? {
+        guard let project = appState.project else { return nil }
+        let settings = project.exportSettings
+        var reasons: [String] = []
+        for side in project.sides where side.hasRecording {
+            switch side.sourceType {
+            case .importedFile where side.sourceInfo?.isMP3 == true:
+                reasons.append("\(side.side.title) is a full-side MP3 — cutting it into tracks requires re-encoding, which loses a little quality. For best results import a WAV/FLAC of the side if you have one.")
+            case .importedFolder:
+                let hasMP3 = side.trackFiles.contains { $0.info?.isMP3 == true }
+                if hasMP3 && (!settings.keepOriginalEncoding || settings.normalizePeaks) {
+                    reasons.append("\(side.side.title)'s imported MP3s will be re-encoded (\(settings.normalizePeaks ? "normalization is on" : "Keep original encoding is off")), which loses a little quality.")
+                }
+            default:
+                break
+            }
+        }
+        return reasons.isEmpty ? nil : reasons.joined(separator: "\n")
+    }
 
     private var previewPath: String {
         guard let project = appState.project else { return outputRoot.path }

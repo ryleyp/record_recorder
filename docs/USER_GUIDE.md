@@ -126,3 +126,60 @@ Then click **Reveal Album in Finder** or **Open in Apple Music**, and use
 - The "Original Recordings" WAVs are your archival copies — keep them and you
   can re-export at any quality later without touching the turntable.
 - One project = one album. Use New Album Project for the next record.
+
+---
+
+# Importing instead of recording
+
+If the Crosley already recorded your album to a USB flash drive or SD card,
+you don't need to play the record again.
+
+1. On the **Add Music** stage, click **Import from USB or Folder** (or just
+   drag the files onto the card).
+2. Plug in the drive — it appears under "Removable drives". Pick the files
+   (MP3, WAV, AIFF, M4A, AAC, FLAC, or CAF) or a whole folder; hidden files,
+   artwork, and anything unsupported are skipped automatically.
+3. Tell the app what the files are:
+   - **One file = a whole side** → detection finds the songs, exactly as with
+     a live recording. With two files you can flip on "First file is Side A,
+     second is Side B".
+   - **Each file = one track** → no detection; confirm the order (embedded
+     track numbers are used when present) and go straight to Album Details.
+4. Keep **Copy files into the project** on (recommended) so the album keeps
+   working after you unplug the drive. Your original files are never touched.
+
+Already-MP3 songs are exported with **Keep original encoding**: the audio is
+copied bit-for-bit and only the tags are rewritten, so there's zero quality
+loss. (Splitting one big MP3 into tracks does require re-encoding — the app
+warns you when that applies.)
+
+# Splitting with the album's tracklist
+
+On the **Detect Tracks** stage, open **"Split using the album's tracklist"**
+and paste the track names — runtimes make it much more accurate:
+
+    Artist: Fleetwood Mac
+    Album: Rumours
+    1. Second Hand News 2:56
+    2. Dreams 4:14
+    ...
+
+Click **Split Using Tracklist**: each cut snaps to the quiet gap nearest the
+listed runtime, the tracks get their names, and the album fields fill in.
+Anything slightly off is a one-second drag in Review Tracks. (The app works
+fully offline, so paste the list from the sleeve, Discogs, or Wikipedia —
+it can't fetch it for you.)
+
+# Coming from Audacity
+
+1. Record the side in Audacity.
+2. Mark the song boundaries (Analyze › Label Sounds, or ⌘B at each gap) and
+   name the labels.
+3. File › Export › **Export Audio** (WAV is ideal) and **Export Labels**.
+4. In Vinyl Album Recorder: Add Music › Import, choose the audio file, click
+   **Attach Audacity Labels** (or drop both files together).
+5. The tracks appear with your Audacity names — add artwork and album
+   details, export, and sync to your iPod.
+
+Audacity `.aup3` project files can't be opened directly — always export
+audio + labels first.

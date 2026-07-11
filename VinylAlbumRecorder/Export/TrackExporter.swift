@@ -102,9 +102,6 @@ enum TrackExporter {
             try checkCancelled()
             let side = project.side(entry.side)
             guard side.hasRecording else { throw ExportError.missingRecording(entry.side) }
-            let segments = side.segments
-            guard entry.indexOnSide < segments.count else { continue }
-            let segment = segments[entry.indexOnSide]
 
             let title = AlbumProject.effectiveTitle(entry.info, number: entry.number)
             let fileName = FileNameSanitizer.trackFileName(number: entry.number, title: title)
@@ -124,15 +121,55 @@ enum TrackExporter {
             tag.discTotal = project.discTotal
             tag.artwork = artworkData
 
-            let sourceURL = ProjectStore.recordingURL(for: entry.side, in: packageURL)
-            try exportTrack(
-                sourceURL: sourceURL,
-                range: segment,
-                tag: tag,
-                settings: project.exportSettings,
-                to: trackURL)
-            result.trackURLs.append(trackURL)
-            exportedDurations.append(segment.upperBound - segment.lowerBound)
+            if side.sourceType == .importedFolder {
+                // Each imported file is already one whole track.
+                guard entry.indexOnSide < side.trackFiles.count,
+                      let fileURL = side.trackFiles[entry.indexOnSide].url(in: packageURL) else {
+                    throw ExportError.missingRecording(entry.side)
+                }
+                let trackFile = side.trackFiles[entry.indexOnSide]
+                let duration = trackFile.info?.durationSeconds ?? 0
+
+                let canPassThrough = trackFile.info?.isMP3 == true
+                    && project.exportSettings.keepOriginalEncoding
+                    && !project.exportSettings.normalizePeaks
+                if canPassThrough {
+                    // Zero generation loss: keep the original MP3 frames and
+                    // just rewrite the tags.
+                    do {
+                        let data = try Data(contentsOf: fileURL)
+                        try MP3Retagger.retag(data, with: tag).write(to: trackURL, options: .atomic)
+                    } catch let error as ExportError {
+                        throw error
+                    } catch {
+                        throw ExportError.audioReadFailed(error.localizedDescription)
+                    }
+                } else {
+                    try exportTrack(
+                        sourceURL: fileURL,
+                        range: 0...(duration > 0 ? duration : 86_400),
+                        tag: tag,
+                        settings: project.exportSettings,
+                        to: trackURL)
+                }
+                result.trackURLs.append(trackURL)
+                exportedDurations.append(duration)
+            } else {
+                let segments = side.segments
+                guard entry.indexOnSide < segments.count else { continue }
+                let segment = segments[entry.indexOnSide]
+                guard let sourceURL = side.audioURL(in: packageURL) else {
+                    throw ExportError.missingRecording(entry.side)
+                }
+                try exportTrack(
+                    sourceURL: sourceURL,
+                    range: segment,
+                    tag: tag,
+                    settings: project.exportSettings,
+                    to: trackURL)
+                result.trackURLs.append(trackURL)
+                exportedDurations.append(segment.upperBound - segment.lowerBound)
+            }
         }
 
         // Artwork copy.
@@ -148,9 +185,30 @@ enum TrackExporter {
             let originalsURL = albumURL.appendingPathComponent("Original Recordings", isDirectory: true)
             try? fm.createDirectory(at: originalsURL, withIntermediateDirectories: true)
             for side in project.sides where side.hasRecording {
-                let source = ProjectStore.recordingURL(for: side.side, in: packageURL)
-                let destination = originalsURL.appendingPathComponent(side.side.exportedWAVName)
-                try convertToWAV(source: source, destination: destination)
+                switch side.sourceType {
+                case .liveRecording:
+                    // Convert the working CAF to a universally readable WAV.
+                    guard let source = side.audioURL(in: packageURL) else { continue }
+                    let destination = originalsURL.appendingPathComponent(side.side.exportedWAVName)
+                    try convertToWAV(source: source, destination: destination)
+                case .importedFile:
+                    // Preserve the imported source byte-for-byte.
+                    guard let source = side.audioURL(in: packageURL) else { continue }
+                    let destination = originalsURL.appendingPathComponent(
+                        "Side \(side.side.rawValue).\(source.pathExtension)")
+                    try? fm.removeItem(at: destination)
+                    try? fm.copyItem(at: source, to: destination)
+                case .importedFolder:
+                    let sideFolder = originalsURL.appendingPathComponent(
+                        "Side \(side.side.rawValue) Tracks", isDirectory: true)
+                    try? fm.createDirectory(at: sideFolder, withIntermediateDirectories: true)
+                    for trackFile in side.trackFiles {
+                        guard let source = trackFile.url(in: packageURL) else { continue }
+                        let destination = sideFolder.appendingPathComponent(source.lastPathComponent)
+                        try? fm.removeItem(at: destination)
+                        try? fm.copyItem(at: source, to: destination)
+                    }
+                }
             }
             result.originalsFolder = originalsURL
         }

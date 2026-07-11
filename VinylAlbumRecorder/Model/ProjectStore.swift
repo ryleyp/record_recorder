@@ -105,8 +105,7 @@ enum ProjectStore {
         var status = ProjectAudioStatus()
         let fm = FileManager.default
         for side in project.sides where side.hasRecording {
-            let url = recordingURL(for: side.side, in: packageURL)
-            if !fm.fileExists(atPath: url.path) {
+            if side.audioIsMissing(in: packageURL) {
                 status.missingSides.append(side.side)
             }
         }

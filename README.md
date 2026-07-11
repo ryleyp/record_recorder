@@ -61,9 +61,46 @@ Sample audio for manual experiments can be regenerated with:
 swift Scripts/generate_sample_audio.swift   # writes SampleAudio/*.wav
 ```
 
-## The workflow
+## Two ways in
 
-1. **Connect** — pick your USB audio input from the device list.
+The first stage offers two large choices that both feed the same detection,
+review, metadata, and export pipeline:
+
+**A. Record from Audio Input** — capture the record live through a USB audio
+adapter (the original workflow, below).
+
+**B. Import from USB or Folder** — bring in recordings the Crosley (or
+anything else) already saved: MP3, WAV, AIFF, M4A, AAC, FLAC, or CAF, from a
+mounted USB flash drive, SD card, external drive, or any folder. Removable
+drives are listed automatically and refresh on insert/eject.
+
+- One file can be a whole side (track detection runs on it) or each file can
+  already be one track (no detection; confirm the order, done).
+- Two files can be imported at once as Side A and Side B.
+- Files are copied into the project by default; a reference-only mode is
+  available. Originals are never modified.
+- Every import is probed (format, sample rate, bit depth, channels, duration,
+  bitrate) with warnings for mono, low-bitrate, corrupt, or unsupported files.
+- Imported audio is **never re-encoded until final export**, and imported
+  MP3 tracks can be exported with **"Keep original encoding"** — tags are
+  rewritten but the audio frames are copied byte-for-byte (verified by test).
+
+**Tracklist-guided splitting:** paste the album's tracklist (from the sleeve,
+Discogs, Wikipedia…) into the Detect stage — one track per line, runtimes
+optional but recommended (`1. Dreams 4:14`). Cuts snap to the detected gap
+nearest each listed runtime, and titles (plus optional `Artist:` / `Album:` /
+`Year:` lines) fill in automatically. The app is fully offline by design, so
+it can't look albums up itself — pasting is the mechanism.
+
+**Audacity interoperability:** recorded and split in Audacity already? Export
+audio (WAV/FLAC/MP3/…) plus File › Export › **Export Labels**, then import
+both together (or drag-drop them onto the app). Labels become track
+boundaries and titles instantly — no silence detection needed. `.aup3`
+projects aren't readable yet; export from Audacity first.
+
+## The recording workflow
+
+1. **Add Music** — pick your USB audio input from the device list (or import).
 2. **Set Levels** — play the loudest part of the record and adjust the
    player's volume until peaks sit between -12 and -6 dBFS; a CLIP lamp warns
    about distortion.
