@@ -44,7 +44,10 @@ If Pages has not been enabled yet:
    detection, and a 0-100 recording quality score.
 3. Record Side A/Side B in the browser as lossless audio.
 4. Run track detection with the conservative, balanced, or aggressive preset.
-5. Optionally paste a tracklist or import Audacity label text.
+5. Optionally paste a tracklist with runtimes or import Audacity label text.
+   Runtime-guided splitting scales the listed runtimes to the actual side,
+   searches near each expected cut for the best quiet gap, and labels each
+   split as high, medium, or low confidence.
 6. Review the waveform and drag trim/cut markers.
 7. Fill in album and track metadata.
 8. Export a ZIP containing WAV tracks, an M3U playlist, artwork, original side

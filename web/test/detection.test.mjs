@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   DETECTION_PRESETS,
   alignTracklist,
+  alignTracklistDetailed,
   applyAudacityLabels,
   detectTracks,
   parseAudacityLabels,
@@ -70,6 +71,51 @@ test("alignTracklist snaps runtimes to nearby gaps", () => {
     ]
   };
   assert.deepEqual(alignTracklist(entries, detection), [121, 299]);
+});
+
+test("alignTracklistDetailed reports runtime-guided confidence", () => {
+  const entries = [
+    { title: "One", duration: 120 },
+    { title: "Two", duration: 180 },
+    { title: "Three", duration: 120 }
+  ];
+  const detection = {
+    suggestedTrimStart: 0,
+    suggestedTrimEnd: 420,
+    candidateGaps: [
+      { startTime: 119, endTime: 123, cutTime: 121, score: 0.82 },
+      { startTime: 297, endTime: 301, cutTime: 299, score: 0.86 }
+    ]
+  };
+
+  const result = alignTracklistDetailed(entries, detection);
+
+  assert.deepEqual(result.boundaries, [121, 299]);
+  assert.equal(result.mode, "runtime");
+  assert.equal(result.alignments.length, 2);
+  assert.equal(result.alignments[0].source, "silence");
+  assert.equal(result.alignments[0].confidence, "high");
+  assert.match(result.summary, /high/);
+});
+
+test("alignTracklistDetailed falls back to runtime when no quiet gap is nearby", () => {
+  const entries = [
+    { title: "One", duration: 100 },
+    { title: "Two", duration: 100 }
+  ];
+  const detection = {
+    suggestedTrimStart: 0,
+    suggestedTrimEnd: 200,
+    candidateGaps: [
+      { startTime: 160, endTime: 164, cutTime: 162, score: 0.95 }
+    ]
+  };
+
+  const result = alignTracklistDetailed(entries, detection, { windowSeconds: 10 });
+
+  assert.deepEqual(result.boundaries, [100]);
+  assert.equal(result.alignments[0].source, "runtime");
+  assert.equal(result.alignments[0].confidence, "low");
 });
 
 test("Audacity label regions become trims, boundaries, and titles", () => {

@@ -307,15 +307,33 @@ export function secondsFromTimestamp(token) {
 }
 
 export function alignTracklist(entries, detection) {
+  return alignTracklistDetailed(entries, detection).boundaries;
+}
+
+export function alignTracklistDetailed(entries, detection, options = {}) {
   const count = entries.length;
-  if (count < 2) return [];
+  if (count < 2) {
+    return {
+      boundaries: [],
+      alignments: [],
+      mode: "none",
+      summary: "Need at least two tracks to place splits."
+    };
+  }
   const start = detection.suggestedTrimStart || 0;
   const end = detection.suggestedTrimEnd || 0;
-  if (end <= start) return [];
+  if (end <= start) {
+    return {
+      boundaries: [],
+      alignments: [],
+      mode: "none",
+      summary: "Could not measure the usable side length."
+    };
+  }
 
   const allRuntimes = entries.every((entry) => entry.duration != null);
   if (allRuntimes) {
-    return alignWithRuntimes(entries, detection);
+    return alignWithRuntimes(entries, detection, options);
   }
 
   const cuts = [...(detection.candidateGaps || [])]
@@ -338,7 +356,22 @@ export function alignTracklist(entries, detection) {
     cuts.push((points[longestIndex] + points[longestIndex + 1]) / 2);
     cuts.sort((a, b) => a - b);
   }
-  return cuts;
+  return {
+    boundaries: cuts,
+    alignments: cuts.map((cutTime, index) => ({
+      trackIndex: index,
+      expectedTime: null,
+      cutTime,
+      source: "silence",
+      confidence: "medium",
+      confidenceScore: 0.6,
+      distanceSeconds: null,
+      gapScore: null,
+      note: "No runtime available; split selected from the strongest detected quiet gaps."
+    })),
+    mode: "silence",
+    summary: `Placed ${cuts.length} splits from detected quiet gaps.`
+  };
 }
 
 export function parseAudacityLabels(text) {
@@ -391,43 +424,229 @@ export function applyAudacityLabels(labels, duration) {
   };
 }
 
-function alignWithRuntimes(entries, detection) {
+function alignWithRuntimes(entries, detection, options = {}) {
   const start = detection.suggestedTrimStart || 0;
   const end = detection.suggestedTrimEnd || 0;
   const musicLength = end - start;
   const totalRuntime = entries.reduce((sum, entry) => sum + (entry.duration || 0), 0);
-  if (totalRuntime <= 0) return [];
+  if (totalRuntime <= 0) {
+    return {
+      boundaries: [],
+      alignments: [],
+      mode: "runtime",
+      summary: "Track runtimes were not usable."
+    };
+  }
 
   const scale = clamp(musicLength / totalRuntime, 0.85, 1.15);
-  const windowSeconds = Math.max(6, musicLength * 0.03);
-  const boundaries = [];
-  const usedCuts = new Set();
-  let cumulative = 0;
+  const expectedDurations = entries.map((entry) => (entry.duration || 0) * scale);
+  const medianDuration = median(expectedDurations);
+  const windowSeconds = options.windowSeconds ?? clamp(
+    Math.max(8, musicLength * 0.03, medianDuration * 0.12),
+    8,
+    35
+  );
+  const candidateGaps = [...(detection.candidateGaps || [])]
+    .filter((gap) => gap.cutTime > start + 0.5 && gap.cutTime < end - 0.5)
+    .sort((a, b) => a.cutTime - b.cutTime);
+  const expectedCuts = [];
+  let cumulative = start;
+  for (const duration of expectedDurations.slice(0, -1)) {
+    cumulative += duration;
+    expectedCuts.push(clamp(cumulative, start + 1, end - 1));
+  }
 
-  entries.slice(0, -1).forEach((entry) => {
-    cumulative += entry.duration || 0;
-    const expected = start + cumulative * scale;
-    let bestIndex = -1;
-    let bestFitness = -Infinity;
-    (detection.candidateGaps || []).forEach((gap, index) => {
-      if (usedCuts.has(index)) return;
-      const distance = Math.abs(gap.cutTime - expected);
-      if (distance > windowSeconds) return;
-      const fitness = gap.score - (distance / windowSeconds) * 0.5;
-      if (fitness > bestFitness) {
-        bestFitness = fitness;
-        bestIndex = index;
-      }
+  const candidatesByCut = expectedCuts.map((expected, index) => {
+    const candidates = candidateGaps
+      .map((gap) => runtimeCandidateFromGap(gap, expected, windowSeconds))
+      .filter(Boolean);
+    candidates.push({
+      time: expected,
+      expectedTime: expected,
+      source: "runtime",
+      gap: null,
+      gapIndex: -1,
+      silenceScore: 0.25,
+      distanceScore: 1,
+      distanceSeconds: 0,
+      baseScore: 0.42
     });
-    if (bestIndex >= 0) {
-      usedCuts.add(bestIndex);
-      boundaries.push(detection.candidateGaps[bestIndex].cutTime);
-    } else {
-      boundaries.push(clamp(expected, start + 1, end - 1));
+    return dedupeCandidates(candidates)
+      .filter((candidate) => candidate.time > start && candidate.time < end)
+      .sort((a, b) => a.time - b.time || b.baseScore - a.baseScore)
+      .map((candidate) => ({ ...candidate, cutIndex: index }));
+  });
+
+  const chosen = chooseRuntimeCandidates(candidatesByCut, expectedDurations, start, end);
+  const boundaries = chosen.map((candidate) => candidate.time).sort((a, b) => a - b);
+  const alignments = chosen.map((candidate, index) => {
+    const previousTime = index === 0 ? start : chosen[index - 1].time;
+    const nextTime = index === chosen.length - 1 ? end : chosen[index + 1].time;
+    const leftDurationScore = segmentDurationScore(candidate.time - previousTime, expectedDurations[index]);
+    const rightDurationScore = segmentDurationScore(nextTime - candidate.time, expectedDurations[index + 1]);
+    const confidenceScore = confidenceForCandidate(candidate, leftDurationScore, rightDurationScore);
+    const confidence = confidenceLabel(confidenceScore, candidate.source);
+    return {
+      trackIndex: index,
+      expectedTime: candidate.expectedTime,
+      cutTime: candidate.time,
+      gapStartTime: candidate.gap?.startTime ?? null,
+      gapEndTime: candidate.gap?.endTime ?? null,
+      source: candidate.source,
+      confidence,
+      confidenceScore,
+      distanceSeconds: candidate.distanceSeconds,
+      gapScore: candidate.gap?.score ?? null,
+      note: runtimeAlignmentNote(candidate, confidence, windowSeconds)
+    };
+  });
+  const high = alignments.filter((alignment) => alignment.confidence === "high").length;
+  const medium = alignments.filter((alignment) => alignment.confidence === "medium").length;
+  const low = alignments.filter((alignment) => alignment.confidence === "low").length;
+  return {
+    boundaries,
+    alignments,
+    mode: "runtime",
+    scale,
+    searchWindowSeconds: windowSeconds,
+    summary: `Runtime-guided split: ${high} high, ${medium} medium, ${low} low confidence.`
+  };
+}
+
+function runtimeCandidateFromGap(gap, expectedTime, windowSeconds) {
+  const distance = Math.abs(gap.cutTime - expectedTime);
+  if (distance > windowSeconds) return null;
+  const distanceScore = clamp(1 - distance / windowSeconds, 0, 1);
+  const silenceScore = clamp(gap.score ?? 0, 0, 1);
+  return {
+    time: gap.cutTime,
+    expectedTime,
+    source: "silence",
+    gap,
+    gapIndex: gap.cutTime,
+    silenceScore,
+    distanceScore,
+    distanceSeconds: distance,
+    baseScore: 0.6 * silenceScore + 0.4 * distanceScore
+  };
+}
+
+function chooseRuntimeCandidates(candidatesByCut, expectedDurations, start, end) {
+  const dp = candidatesByCut.map((candidates) => candidates.map(() => ({
+    score: -Infinity,
+    previousIndex: -1
+  })));
+  const minGap = 1;
+
+  candidatesByCut.forEach((candidates, cutIndex) => {
+    candidates.forEach((candidate, candidateIndex) => {
+      if (cutIndex === 0) {
+        const segmentScore = segmentDurationScore(candidate.time - start, expectedDurations[0]);
+        dp[cutIndex][candidateIndex].score = candidate.baseScore + 0.3 * segmentScore;
+        return;
+      }
+      candidatesByCut[cutIndex - 1].forEach((previous, previousIndex) => {
+        if (previous.time + minGap >= candidate.time) return;
+        const segmentScore = segmentDurationScore(
+          candidate.time - previous.time,
+          expectedDurations[cutIndex]
+        );
+        const score = dp[cutIndex - 1][previousIndex].score
+          + candidate.baseScore
+          + 0.3 * segmentScore;
+        if (score > dp[cutIndex][candidateIndex].score) {
+          dp[cutIndex][candidateIndex] = {
+            score,
+            previousIndex
+          };
+        }
+      });
+    });
+  });
+
+  const lastCutIndex = candidatesByCut.length - 1;
+  if (lastCutIndex < 0) return [];
+  let bestIndex = 0;
+  let bestScore = -Infinity;
+  const finalExpectedDuration = expectedDurations[expectedDurations.length - 1];
+  candidatesByCut[lastCutIndex].forEach((candidate, index) => {
+    const finalSegmentScore = segmentDurationScore(end - candidate.time, finalExpectedDuration);
+    const score = dp[lastCutIndex][index].score + 0.35 * finalSegmentScore;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
     }
   });
 
-  return boundaries.sort((a, b) => a - b);
+  const chosen = [];
+  let cursor = bestIndex;
+  for (let cutIndex = lastCutIndex; cutIndex >= 0; cutIndex -= 1) {
+    chosen.unshift(candidatesByCut[cutIndex][cursor]);
+    cursor = dp[cutIndex][cursor].previousIndex;
+    if (cursor < 0 && cutIndex > 0) {
+      const fallback = candidatesByCut
+        .slice(0, cutIndex)
+        .map((candidates) => candidates.find((candidate) => candidate.source === "runtime") || candidates[0]);
+      return [...fallback, ...chosen].sort((a, b) => a.time - b.time);
+    }
+  }
+  return chosen;
+}
+
+function segmentDurationScore(actual, expected) {
+  if (!Number.isFinite(actual) || !Number.isFinite(expected) || expected <= 0) return 0;
+  const tolerance = Math.max(8, expected * 0.18);
+  return clamp(1 - Math.abs(actual - expected) / tolerance, 0, 1);
+}
+
+function confidenceForCandidate(candidate, leftDurationScore, rightDurationScore) {
+  return clamp(
+    0.5 * candidate.silenceScore
+      + 0.3 * candidate.distanceScore
+      + 0.2 * Math.min(leftDurationScore, rightDurationScore),
+    0,
+    1
+  );
+}
+
+function confidenceLabel(score, source) {
+  if (source !== "silence") return "low";
+  if (score >= 0.76) return "high";
+  if (score >= 0.55) return "medium";
+  return "low";
+}
+
+function runtimeAlignmentNote(candidate, confidence, windowSeconds) {
+  if (candidate.source !== "silence") {
+    return "No quiet gap was found near the expected runtime, so this split uses the runtime estimate.";
+  }
+  const roundedDistance = Math.round(candidate.distanceSeconds);
+  if (confidence === "high") {
+    return `Snapped to a strong quiet gap ${roundedDistance}s from the expected runtime.`;
+  }
+  if (confidence === "medium") {
+    return `Snapped to a nearby quiet gap ${roundedDistance}s from the expected runtime; quick review suggested.`;
+  }
+  return `Closest quiet gap was weak or far from the expected runtime (${roundedDistance}s of ${Math.round(windowSeconds)}s window).`;
+}
+
+function dedupeCandidates(candidates) {
+  const result = [];
+  for (const candidate of candidates.sort((a, b) => b.baseScore - a.baseScore)) {
+    if (!result.some((existing) => Math.abs(existing.time - candidate.time) < 0.25)) {
+      result.push(candidate);
+    }
+  }
+  return result;
+}
+
+function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
 }
 
 function headerValue(line, keys) {

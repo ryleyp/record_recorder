@@ -1,6 +1,6 @@
 import {
   DETECTION_PRESETS,
-  alignTracklist,
+  alignTracklistDetailed,
   applyAudacityLabels,
   computeEnvelopeFromAudioBuffer,
   computePeaksFromAudioBuffer,
@@ -271,6 +271,7 @@ function createSide(label) {
     detectionSettings: defaultDetectionSettings(),
     candidateGaps: [],
     effectiveThresholdDB: null,
+    tracklistAlignment: null,
     recordingStats: null,
     envelope: null,
     peaks: []
@@ -509,6 +510,7 @@ function assignAudioToSide(sideLabel, audioBuffer, sourceName, sourceType) {
   side.tracks = [];
   side.candidateGaps = [];
   side.effectiveThresholdDB = null;
+  side.tracklistAlignment = null;
   side.recordingStats = qualityStatsFromAudioBuffer(
     audioBuffer,
     state.noiseStats?.noise_floor ?? state.project.noiseFloor
@@ -537,6 +539,7 @@ function runDetectionForActiveSide() {
   side.trimStart = result.suggestedTrimStart;
   side.trimEnd = result.suggestedTrimEnd;
   side.effectiveThresholdDB = result.effectiveThresholdDB;
+  side.tracklistAlignment = null;
   reconcileTracks(side);
   state.reviewSide = state.detectSide;
   setStatus(`Detected ${side.tracks.length} tracks on Side ${state.detectSide}`);
@@ -569,12 +572,14 @@ function applyTracklistToActiveSide() {
     : runDetectionForActiveSide();
   if (!detection) return;
 
-  side.boundaries = alignTracklist(parsed.entries, detection);
+  const alignment = alignTracklistDetailed(parsed.entries, detection);
+  side.boundaries = alignment.boundaries;
+  side.tracklistAlignment = alignment;
   reconcileTracks(side);
   parsed.entries.forEach((entry, index) => {
     if (side.tracks[index]) side.tracks[index].title = entry.title;
   });
-  setStatus(`Applied ${parsed.entries.length} track titles`);
+  setStatus(`${alignment.summary} Applied ${parsed.entries.length} track titles.`);
   render();
 }
 
@@ -838,6 +843,7 @@ async function loadProjectFile() {
       side.boundaries = Array.isArray(saved.boundaries) ? saved.boundaries : [];
       side.tracks = Array.isArray(saved.tracks) ? saved.tracks : [];
       side.detectionSettings = saved.detectionSettings || defaultDetectionSettings();
+      side.tracklistAlignment = saved.tracklistAlignment || null;
       side.recordingStats = saved.recordingStats || saved.recording_statistics || null;
     });
     setStatus("Project metadata loaded");
@@ -879,6 +885,7 @@ function serializeProject() {
             boundaries: side.boundaries,
             tracks: side.tracks,
             detectionSettings: side.detectionSettings,
+            tracklistAlignment: side.tracklistAlignment,
             recordingStats: side.recordingStats,
             recording_statistics: exportRecordingStatistics(side.recordingStats)
           }
@@ -1022,9 +1029,15 @@ function renderReadoutTrackList(container, side, compact = false, tracks = null)
     const element = document.createElement("div");
     element.className = "readout-row";
     const title = effectiveTrackTitle(row.info, row.number);
+    const confidence = row.splitConfidence
+      ? `<span class="confidence-badge ${row.splitConfidence.confidence}">${row.splitConfidence.confidence}</span>`
+      : "";
     element.innerHTML = compact
-      ? `<span class="track-number">${String(row.number).padStart(2, "0")}</span><span class="track-duration">${formatTime(row.segment.end - row.segment.start)}</span><span>${escapeHTML(title)}</span>`
-      : `<span class="track-number">${String(row.number).padStart(2, "0")}</span><span class="track-duration">${formatTime(row.segment.end - row.segment.start)}</span><span>${escapeHTML(title)}</span><span>${escapeHTML(row.info.artist || "")}</span>`;
+      ? `<span class="track-number">${String(row.number).padStart(2, "0")}</span><span class="track-duration">${formatTime(row.segment.end - row.segment.start)}</span><span>${escapeHTML(title)}</span>${confidence}`
+      : `<span class="track-number">${String(row.number).padStart(2, "0")}</span><span class="track-duration">${formatTime(row.segment.end - row.segment.start)}</span><span>${escapeHTML(title)}</span><span>${confidence || escapeHTML(row.info.artist || "")}</span>`;
+    if (row.splitConfidence?.note) {
+      element.title = row.splitConfidence.note;
+    }
     container.append(element);
   });
 }
@@ -1432,7 +1445,8 @@ function getSideReadoutRows(side) {
     index,
     number: globalTrackNumber(side.label, index),
     segment,
-    info: side.tracks[index] || { title: "", artist: "" }
+    info: side.tracks[index] || { title: "", artist: "" },
+    splitConfidence: index > 0 ? side.tracklistAlignment?.alignments?.[index - 1] : null
   }));
 }
 

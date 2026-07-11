@@ -521,7 +521,7 @@ h3 {
 }
 
 .track-list.compact .readout-row {
-  grid-template-columns: 54px 82px minmax(0, 1fr);
+  grid-template-columns: 54px 82px minmax(0, 1fr) auto;
 }
 
 .track-number {
@@ -537,6 +537,34 @@ h3 {
 .track-title-input,
 .track-artist-input {
   min-height: 36px;
+}
+
+.confidence-badge {
+  justify-self: end;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 0.78rem;
+  font-weight: 760;
+  text-transform: capitalize;
+}
+
+.confidence-badge.high {
+  border-color: rgba(47, 127, 79, 0.45);
+  color: var(--green);
+  background: rgba(47, 127, 79, 0.08);
+}
+
+.confidence-badge.medium {
+  border-color: rgba(196, 147, 38, 0.5);
+  color: #8a6212;
+  background: rgba(196, 147, 38, 0.12);
+}
+
+.confidence-badge.low {
+  border-color: rgba(196, 60, 50, 0.42);
+  color: var(--red);
+  background: rgba(196, 60, 50, 0.08);
 }
 
 .empty-state {
@@ -821,6 +849,11 @@ h3 {
 
   .track-duration {
     justify-self: end;
+  }
+
+  .confidence-badge {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .track-title-input,
