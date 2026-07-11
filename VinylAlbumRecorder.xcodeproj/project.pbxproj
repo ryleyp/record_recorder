@@ -395,6 +395,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/VinylAlbumRecorder/ThirdParty/lame/include",
+					"$(SRCROOT)/VinylAlbumRecorder/ThirdParty/lame",
+					"$(SRCROOT)/VinylAlbumRecorder/ThirdParty/lame/libmp3lame",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ryleypriddy.VinylAlbumRecorderTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -411,6 +416,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/VinylAlbumRecorder/ThirdParty/lame/include",
+					"$(SRCROOT)/VinylAlbumRecorder/ThirdParty/lame",
+					"$(SRCROOT)/VinylAlbumRecorder/ThirdParty/lame/libmp3lame",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ryleypriddy.VinylAlbumRecorderTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
