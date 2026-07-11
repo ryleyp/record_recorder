@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f7f2">
+    <title>Vinyl Album Recorder</title>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="record-dot" aria-hidden="true"></span>
+        <div>
+          <h1>Vinyl Album Recorder</h1>
+          <p id="statusLine">Ready</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button id="saveProjectButton" type="button">Save Project</button>
+        <label class="button" for="loadProjectInput">Load Project</label>
+        <input id="loadProjectInput" class="visually-hidden" type="file" accept="application/json,.json">
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <nav class="step-nav" aria-label="Workflow">
+        <button class="step-tab is-active" type="button" data-step="add">Add Music</button>
+        <button class="step-tab" type="button" data-step="levels">Set Levels</button>
+        <button class="step-tab" type="button" data-step="record">Record</button>
+        <button class="step-tab" type="button" data-step="detect">Detect</button>
+        <button class="step-tab" type="button" data-step="review">Review</button>
+        <button class="step-tab" type="button" data-step="details">Details</button>
+        <button class="step-tab" type="button" data-step="export">Export</button>
+      </nav>
+
+      <section class="stage is-active" id="stage-add" aria-labelledby="add-title">
+        <div class="stage-heading">
+          <div>
+            <h2 id="add-title">Add Music</h2>
+            <p>Import existing side recordings, or continue to Set Levels before recording from a USB input.</p>
+          </div>
+          <div class="side-summary" id="sideSummaryAdd"></div>
+        </div>
+
+        <div class="add-grid">
+          <section class="tool-panel" aria-labelledby="import-title">
+            <h3 id="import-title">Import</h3>
+            <div class="import-grid">
+              <label class="file-drop" for="importSideAInput">
+                <span>Side A Audio</span>
+                <strong id="sideAFileName">Choose file</strong>
+              </label>
+              <input id="importSideAInput" class="visually-hidden" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.aiff,.aif,.caf">
+
+              <label class="file-drop" for="importSideBInput">
+                <span>Side B Audio</span>
+                <strong id="sideBFileName">Choose file</strong>
+              </label>
+              <input id="importSideBInput" class="visually-hidden" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.aiff,.aif,.caf">
+            </div>
+            <p class="fine-print">Decoding depends on the browser. WAV, MP3, M4A, and AAC are widely supported.</p>
+          </section>
+
+          <section class="tool-panel">
+            <h3>Recording Target</h3>
+            <ul class="target-list">
+              <li><span class="status-dot green"></span>Ideal peaks: -12 dBFS to -6 dBFS</li>
+              <li><span class="status-dot green"></span>Target peak: approximately -8 dBFS</li>
+              <li><span class="status-dot green"></span>Average RMS: approximately -24 to -18 dBFS</li>
+              <li><span class="status-dot yellow"></span>Avoid recording hotter than -6 dBFS</li>
+              <li><span class="status-dot red"></span>Clipping risk starts above -3 dBFS</li>
+            </ul>
+            <p class="fine-print">For vinyl recording: record lossless WAV first, aim for peaks around -10 dBFS, avoid normalization during recording, avoid recording hotter than -6 dBFS, and preserve headroom for pops and transients.</p>
+            <button type="button" class="primary" data-step-shortcut="levels">Set Levels</button>
+          </section>
+        </div>
+      </section>
+
+      <section class="stage" id="stage-levels" aria-labelledby="levels-title">
+        <div class="stage-heading">
+          <div>
+            <h2 id="levels-title">Set Levels</h2>
+            <p>Monitor the input, analyze the loudest section, and measure surface noise before recording.</p>
+          </div>
+          <div class="quality-score" id="overallQualityScore">-- / 100</div>
+        </div>
+
+        <div class="levels-layout">
+          <section class="tool-panel">
+            <h3>Input Monitor</h3>
+            <div class="field-row">
+              <label for="inputDeviceSelect">Input</label>
+              <select id="inputDeviceSelect"></select>
+              <button id="refreshDevicesButton" type="button">Refresh</button>
+            </div>
+
+            <div class="meters large-meters" aria-label="Input level meters">
+              <div class="meter-row">
+                <span>L</span>
+                <div class="meter-track"><span id="meterLeft"></span></div>
+                <output id="meterLeftText">-inf dB</output>
+              </div>
+              <div class="meter-row">
+                <span>R</span>
+                <div class="meter-track"><span id="meterRight"></span></div>
+                <output id="meterRightText">-inf dB</output>
+              </div>
+            </div>
+
+            <div class="stats-grid">
+              <div><span>Peak L/R</span><strong id="levelPeakReadout">-inf / -inf dBFS</strong></div>
+              <div><span>RMS</span><strong id="levelRmsReadout">-inf dBFS</strong></div>
+              <div><span>Short-term avg</span><strong id="levelShortTermReadout">-inf dBFS</strong></div>
+              <div><span>Clips</span><strong id="levelClipReadout">0</strong></div>
+            </div>
+
+            <div class="button-row">
+              <button id="startMonitorButton" class="primary" type="button">Start Monitoring</button>
+              <button id="stopMonitorButton" type="button" disabled>Stop Monitoring</button>
+            </div>
+          </section>
+
+          <section class="tool-panel">
+            <h3>Targets</h3>
+            <div class="target-bands">
+              <div><span class="status-dot green"></span><strong>Ideal peaks</strong><span>-12 to -6 dBFS</span></div>
+              <div><span class="status-dot green"></span><strong>Acceptable</strong><span>-18 to -6 dBFS</span></div>
+              <div><span class="status-dot yellow"></span><strong>Warning</strong><span>Above -3 dBFS</span></div>
+              <div><span class="status-dot red"></span><strong>Clipping</strong><span>0 dBFS or higher</span></div>
+            </div>
+            <div class="button-row">
+              <button id="analyzeLevelsButton" type="button">Analyze Loudest Section</button>
+              <button id="measureNoiseButton" type="button">Measure Surface Noise</button>
+            </div>
+            <progress id="analysisProgress" max="1" value="0"></progress>
+            <p class="fine-print" id="analysisStatus">Play the loudest section, then analyze for 12 seconds.</p>
+          </section>
+
+          <section class="tool-panel">
+            <h3>Level Analysis</h3>
+            <div class="stats-grid quality-readout">
+              <div><span>Peak</span><strong id="analysisPeak">Not measured</strong></div>
+              <div><span>Average RMS</span><strong id="analysisRms">Not measured</strong></div>
+              <div><span>Dynamic range</span><strong id="analysisDynamicRange">Not measured</strong></div>
+              <div><span>Clipping</span><strong id="analysisClips">Not measured</strong></div>
+            </div>
+            <div id="qualityBreakdown" class="quality-breakdown"></div>
+          </section>
+
+          <section class="tool-panel">
+            <h3>Surface Noise</h3>
+            <div class="noise-card" id="noiseFloorCard">
+              <strong>Not measured</strong>
+              <span>Measure 5 seconds with the stylus on the record or between tracks.</span>
+            </div>
+            <ul class="target-list">
+              <li>Excellent: below -55 dBFS</li>
+              <li>Good: -55 to -45 dBFS</li>
+              <li>Acceptable: -45 to -35 dBFS</li>
+              <li>Poor: above -35 dBFS</li>
+            </ul>
+          </section>
+
+          <section class="tool-panel">
+            <h3>Problems</h3>
+            <div id="problemList" class="problem-list"></div>
+          </section>
+
+          <section class="tool-panel">
+            <h3>Recommendations</h3>
+            <div id="recommendationList" class="recommendation-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="stage" id="stage-record" aria-labelledby="record-title">
+        <div class="stage-heading">
+          <div>
+            <h2 id="record-title">Record</h2>
+            <p>Capture each side as lossless browser audio before splitting into tracks.</p>
+          </div>
+          <div class="side-summary" id="sideSummaryRecord"></div>
+        </div>
+
+        <div class="record-layout">
+          <section class="tool-panel">
+            <h3>Capture</h3>
+            <div class="record-controls">
+              <button id="recordSideAButton" class="danger" type="button">Record Side A</button>
+              <button id="recordSideBButton" class="danger" type="button">Record Side B</button>
+              <button id="stopRecordingButton" type="button" disabled>Stop</button>
+            </div>
+            <div class="stats-grid">
+              <div><span>Elapsed</span><strong id="recordingClock">00:00</strong></div>
+              <div><span>Remaining storage</span><strong id="recordingStorage">Checking...</strong></div>
+              <div><span>Clipping counter</span><strong id="recordingClipCount">0</strong></div>
+              <div><span>Quality score</span><strong id="recordingQualityScore">-- / 100</strong></div>
+            </div>
+          </section>
+
+          <section class="tool-panel">
+            <h3>Live Stats</h3>
+            <div class="stats-grid">
+              <div><span>Peak L/R</span><strong id="recordingPeakReadout">-inf / -inf dBFS</strong></div>
+              <div><span>Average RMS</span><strong id="recordingRmsReadout">-inf dBFS</strong></div>
+              <div><span>Noise floor estimate</span><strong id="recordingNoiseFloor">Not measured</strong></div>
+              <div><span>Input status</span><strong id="recordingProblemStatus">Ready</strong></div>
+            </div>
+            <p class="fine-print">The final recording statistics are saved into the project metadata and exported inside the album ZIP.</p>
+          </section>
+        </div>
+      </section>
+
+      <section class="stage" id="stage-detect" aria-labelledby="detect-title">
+        <div class="stage-heading">
+          <div>
+            <h2 id="detect-title">Detect</h2>
+            <p>Find the quiet gaps between songs.</p>
+          </div>
+          <div class="side-picker" role="group" aria-label="Detection side">
+            <button class="side-toggle is-active" type="button" data-side-target="detect" data-side="A">Side A</button>
+            <button class="side-toggle" type="button" data-side-target="detect" data-side="B">Side B</button>
+          </div>
+        </div>
+
+        <div class="detect-layout">
+          <section class="tool-panel">
+            <h3>Settings</h3>
+            <div class="segmented" role="group" aria-label="Detection preset">
+              <button type="button" data-preset="conservative">Conservative</button>
+              <button class="is-active" type="button" data-preset="balanced">Balanced</button>
+              <button type="button" data-preset="aggressive">Aggressive</button>
+            </div>
+            <label class="slider-field">
+              <span>Silence threshold <output id="thresholdOutput">-40 dB</output></span>
+              <input id="thresholdInput" type="range" min="-65" max="-20" step="1" value="-40">
+            </label>
+            <label class="slider-field">
+              <span>Minimum gap <output id="gapOutput">1.5 s</output></span>
+              <input id="gapInput" type="range" min="0.5" max="5" step="0.1" value="1.5">
+            </label>
+            <label class="slider-field">
+              <span>Minimum track <output id="trackMinOutput">30 s</output></span>
+              <input id="trackMinInput" type="range" min="10" max="90" step="1" value="30">
+            </label>
+            <button id="detectButton" class="primary" type="button">Detect Tracks</button>
+            <p class="fine-print" id="detectResultText">No detection run yet.</p>
+          </section>
+
+          <section class="tool-panel">
+            <h3>Tracklist</h3>
+            <textarea id="tracklistInput" rows="9" spellcheck="false" placeholder="Artist:&#10;Album:&#10;1. Track title 3:45"></textarea>
+            <div class="button-row">
+              <button id="applyTracklistButton" type="button">Apply Tracklist</button>
+              <label class="button" for="labelFileInput">Audacity Labels</label>
+              <input id="labelFileInput" class="visually-hidden" type="file" accept=".txt,text/plain">
+            </div>
+          </section>
+
+          <section class="tool-panel track-preview">
+            <h3>Tracks</h3>
+            <div id="detectTrackList" class="track-list compact"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="stage" id="stage-review" aria-labelledby="review-title">
+        <div class="stage-heading">
+          <div>
+            <h2 id="review-title">Review</h2>
+            <p>Adjust trims and track markers.</p>
+          </div>
+          <div class="side-picker" role="group" aria-label="Review side">
+            <button class="side-toggle is-active" type="button" data-side-target="review" data-side="A">Side A</button>
+            <button class="side-toggle" type="button" data-side-target="review" data-side="B">Side B</button>
+          </div>
+        </div>
+
+        <section class="waveform-panel">
+          <canvas id="waveformCanvas" aria-label="Side waveform"></canvas>
+          <div class="marker-actions">
+            <button id="addMarkerButton" type="button">Add Marker</button>
+            <button id="deleteMarkerButton" type="button">Delete Marker</button>
+            <button id="playSelectionButton" type="button">Play Track</button>
+            <button id="stopPlaybackButton" type="button">Stop Playback</button>
+          </div>
+        </section>
+
+        <section class="tool-panel">
+          <h3>Side Tracks</h3>
+          <div id="reviewTrackList" class="track-list"></div>
+        </section>
+      </section>
+
+      <section class="stage" id="stage-details" aria-labelledby="details-title">
+        <div class="stage-heading">
+          <div>
+            <h2 id="details-title">Details</h2>
+            <p>Name the album and tracks.</p>
+          </div>
+          <div class="side-summary" id="sideSummaryDetails"></div>
+        </div>
+
+        <div class="details-layout">
+          <section class="tool-panel details-form">
+            <h3>Album</h3>
+            <label>Title <input id="albumTitleInput" type="text" autocomplete="off"></label>
+            <label>Artist <input id="albumArtistInput" type="text" autocomplete="off"></label>
+            <div class="field-pair">
+              <label>Year <input id="yearInput" type="number" min="1880" max="2200"></label>
+              <label>Genre <input id="genreInput" type="text" autocomplete="off"></label>
+            </div>
+            <div class="field-pair">
+              <label>Disc <input id="discNumberInput" type="number" min="1" value="1"></label>
+              <label>Of <input id="discTotalInput" type="number" min="1" value="1"></label>
+            </div>
+            <label class="artwork-drop" for="artworkInput">
+              <img id="artworkPreview" alt="" hidden>
+              <span id="artworkText">Artwork</span>
+            </label>
+            <input id="artworkInput" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp">
+          </section>
+
+          <section class="tool-panel">
+            <h3>Album Tracks</h3>
+            <div id="albumTrackList" class="track-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="stage" id="stage-export" aria-labelledby="export-title">
+        <div class="stage-heading">
+          <div>
+            <h2 id="export-title">Export</h2>
+            <p>Create a ZIP with WAV tracks, playlist, artwork, and project metadata.</p>
+          </div>
+          <div class="side-summary" id="sideSummaryExport"></div>
+        </div>
+
+        <div class="export-layout">
+          <section class="tool-panel">
+            <h3>Options</h3>
+            <label class="check-row"><input id="normalizeInput" type="checkbox"> Peak normalize</label>
+            <label class="check-row"><input id="playlistInput" type="checkbox" checked> M3U playlist</label>
+            <label class="check-row"><input id="originalsInput" type="checkbox" checked> Original side WAVs</label>
+            <div class="field-pair">
+              <label>Fade in (ms) <input id="fadeInInput" type="number" min="0" max="5000" value="0"></label>
+              <label>Fade out (ms) <input id="fadeOutInput" type="number" min="0" max="5000" value="15"></label>
+            </div>
+            <button id="exportButton" class="primary" type="button">Export ZIP</button>
+          </section>
+
+          <section class="tool-panel">
+            <h3>Album Package</h3>
+            <div id="exportTrackList" class="track-list compact"></div>
+            <progress id="exportProgress" max="1" value="0"></progress>
+            <p class="fine-print" id="exportStatus">Nothing exported yet.</p>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <template id="trackRowTemplate">
+      <div class="track-row">
+        <span class="track-number"></span>
+        <span class="track-duration"></span>
+        <input class="track-title-input" type="text" autocomplete="off">
+        <input class="track-artist-input" type="text" autocomplete="off" placeholder="Artist override">
+      </div>
+    </template>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

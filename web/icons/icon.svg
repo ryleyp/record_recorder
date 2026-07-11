@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Vinyl Album Recorder">
+  <rect width="512" height="512" rx="96" fill="#f7f7f2"/>
+  <circle cx="256" cy="256" r="176" fill="#171b19"/>
+  <circle cx="256" cy="256" r="118" fill="none" stroke="#303733" stroke-width="12"/>
+  <circle cx="256" cy="256" r="78" fill="#156f6b"/>
+  <circle cx="256" cy="256" r="22" fill="#f7f7f2"/>
+  <path d="M355 142l47 47-108 108-47-47z" fill="#c49326"/>
+  <path d="M397 184l31 31-38 38-31-31z" fill="#b8332a"/>
+</svg>
