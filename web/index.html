@@ -65,6 +65,28 @@
           </section>
 
           <section class="tool-panel">
+            <h3>Import Optimization</h3>
+            <label>Cleanup preset
+              <select id="cleanupPresetSelect">
+                <option value="standard" selected>Standard vinyl cleanup</option>
+                <option value="gentle">Gentle cleanup</option>
+                <option value="restore">Restore noisy copy</option>
+                <option value="off">No cleanup</option>
+              </select>
+            </label>
+            <label class="check-row"><input id="applyImportCleanupInput" type="checkbox" checked> Apply selected cleanup to imported audio</label>
+            <label class="check-row"><input id="removeDCOffsetInput" type="checkbox" checked> Remove DC offset</label>
+            <label class="check-row"><input id="highPassRumbleInput" type="checkbox" checked> High-pass rumble below 28 Hz</label>
+            <label class="check-row"><input id="balanceChannelsInput" type="checkbox" checked> Balance stereo channels</label>
+            <label class="check-row"><input id="gentleDeClickInput" type="checkbox" checked> Gentle de-click isolated pops</label>
+            <label class="check-row"><input id="normalizeImportInput" type="checkbox"> Peak normalize imported working copy</label>
+            <div class="noise-card" id="importOptimizationStatus">
+              <strong>Ready</strong>
+              <span>Original imports are preserved for the Original Recordings export.</span>
+            </div>
+          </section>
+
+          <section class="tool-panel">
             <h3>Recording Target</h3>
             <ul class="target-list">
               <li><span class="status-dot green"></span>Ideal peaks: -12 dBFS to -6 dBFS</li>
@@ -208,8 +230,10 @@
               <div><span>Average RMS</span><strong id="recordingRmsReadout">-inf dBFS</strong></div>
               <div><span>Noise floor estimate</span><strong id="recordingNoiseFloor">Not measured</strong></div>
               <div><span>Input status</span><strong id="recordingProblemStatus">Ready</strong></div>
+              <div><span>Gap listener</span><strong id="recordingGapStatus">Waiting</strong></div>
+              <div><span>Suggested trim</span><strong id="recordingTrimSuggestion">Not set</strong></div>
             </div>
-            <p class="fine-print">The final recording statistics are saved into the project metadata and exported inside the album ZIP.</p>
+            <p class="fine-print">The app listens for lead-in silence at the start and long quiet gaps at run-out or when you flip the record. It suggests trims but keeps the full recording.</p>
           </section>
         </div>
       </section>
@@ -257,6 +281,10 @@
               <button id="applyTracklistButton" type="button">Apply Tracklist</button>
               <label class="button" for="labelFileInput">Audacity Labels</label>
               <input id="labelFileInput" class="visually-hidden" type="file" accept=".txt,text/plain">
+            </div>
+            <div class="noise-card" id="tracklistAlignmentStatus">
+              <strong>Runtime guidance</strong>
+              <span>Paste runtimes to check speed drift and confidence.</span>
             </div>
           </section>
 
@@ -344,6 +372,7 @@
           <section class="tool-panel">
             <h3>Options</h3>
             <label class="check-row"><input id="normalizeInput" type="checkbox"> Peak normalize</label>
+            <label class="check-row"><input id="matchLoudnessInput" type="checkbox"> Match track loudness gently</label>
             <label class="check-row"><input id="playlistInput" type="checkbox" checked> M3U playlist</label>
             <label class="check-row"><input id="originalsInput" type="checkbox" checked> Original side WAVs</label>
             <div class="field-pair">

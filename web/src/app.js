@@ -1,4 +1,10 @@
 import {
+  analyzeImportAudioBuffer,
+  applyImportCleanupToAudioBuffer,
+  cleanupOptionsForPreset,
+  defaultImportCleanupOptions
+} from "./audioCleanup.js";
+import {
   DETECTION_PRESETS,
   alignTracklistDetailed,
   applyAudacityLabels,
@@ -9,6 +15,11 @@ import {
   parseAudacityLabels,
   parseTracklist
 } from "./detection.js";
+import {
+  createRecordingGapListener,
+  finalizeRecordingGapListener,
+  updateRecordingGapListener
+} from "./gapListener.js";
 import {
   analyzeInputLevels,
   calculateRecordingScore,
@@ -22,6 +33,7 @@ import { encodeAudioBufferToWav, encodeSegmentToWav } from "./wav.js";
 import { createZip } from "./zip.js";
 import {
   clamp,
+  dbFromPeak,
   downloadBlob,
   formatDB,
   formatTime,
@@ -47,6 +59,8 @@ const state = {
   levelStats: null,
   noiseStats: null,
   recordingRolling: null,
+  recordingGapListener: null,
+  recordingGapSnapshot: null,
   recordingClipCount: 0,
   storageTimer: 0,
   recorder: null,
@@ -80,8 +94,19 @@ const dom = {
   recordingRmsReadout: byId("recordingRmsReadout"),
   recordingNoiseFloor: byId("recordingNoiseFloor"),
   recordingProblemStatus: byId("recordingProblemStatus"),
+  recordingGapStatus: byId("recordingGapStatus"),
+  recordingTrimSuggestion: byId("recordingTrimSuggestion"),
   importSideAInput: byId("importSideAInput"),
   importSideBInput: byId("importSideBInput"),
+  cleanupPresetSelect: byId("cleanupPresetSelect"),
+  applyImportCleanupInput: byId("applyImportCleanupInput"),
+  removeDCOffsetInput: byId("removeDCOffsetInput"),
+  highPassRumbleInput: byId("highPassRumbleInput"),
+  balanceChannelsInput: byId("balanceChannelsInput"),
+  gentleDeClickInput: byId("gentleDeClickInput"),
+  normalizeImportInput: byId("normalizeImportInput"),
+  importOptimizationStatus: byId("importOptimizationStatus"),
+  tracklistAlignmentStatus: byId("tracklistAlignmentStatus"),
   sideAFileName: byId("sideAFileName"),
   sideBFileName: byId("sideBFileName"),
   sideSummaryAdd: byId("sideSummaryAdd"),
@@ -136,6 +161,7 @@ const dom = {
   artworkText: byId("artworkText"),
   albumTrackList: byId("albumTrackList"),
   normalizeInput: byId("normalizeInput"),
+  matchLoudnessInput: byId("matchLoudnessInput"),
   playlistInput: byId("playlistInput"),
   originalsInput: byId("originalsInput"),
   fadeInInput: byId("fadeInInput"),
@@ -200,6 +226,9 @@ function bindEvents() {
   dom.recordSideAButton.addEventListener("click", () => startRecording("A"));
   dom.recordSideBButton.addEventListener("click", () => startRecording("B"));
   dom.stopRecordingButton.addEventListener("click", stopRecording);
+  dom.cleanupPresetSelect.addEventListener("change", () => {
+    applyCleanupPreset(dom.cleanupPresetSelect.value);
+  });
   dom.importSideAInput.addEventListener("change", () => importSideFile("A", dom.importSideAInput.files[0]));
   dom.importSideBInput.addEventListener("change", () => importSideFile("B", dom.importSideBInput.files[0]));
   dom.detectButton.addEventListener("click", runDetectionForActiveSide);
@@ -261,6 +290,7 @@ function createSide(label) {
     sourceName: "",
     sourceType: "empty",
     audioBuffer: null,
+    originalAudioBuffer: null,
     durationSeconds: 0,
     sampleRate: 0,
     channelCount: 0,
@@ -272,7 +302,10 @@ function createSide(label) {
     candidateGaps: [],
     effectiveThresholdDB: null,
     tracklistAlignment: null,
+    recordingGap: null,
     recordingStats: null,
+    importAnalysis: null,
+    importOptimization: null,
     envelope: null,
     peaks: []
   };
@@ -421,6 +454,10 @@ async function startRecording(sideLabel) {
     setStatus(`Recording Side ${sideLabel}`);
     state.recordingSide = sideLabel;
     state.recordingRolling = null;
+    state.recordingGapListener = createRecordingGapListener({
+      noiseFloorDBFS: state.noiseStats?.noise_floor ?? state.project.noiseFloor
+    });
+    state.recordingGapSnapshot = null;
     state.recordingClipCount = 0;
     state.recorder = new BrowserRecorder({
       onFrame: handleRecordingFrame,
@@ -447,7 +484,14 @@ async function stopRecording() {
   try {
     setStatus(`Saving Side ${sideLabel}`);
     const audioBuffer = await state.recorder.stop();
-    assignAudioToSide(sideLabel, audioBuffer, `Recorded Side ${sideLabel}.wav`, "liveRecording");
+    const gapSummary = finalizeRecordingGapListener(state.recordingGapListener, audioBuffer.duration);
+    assignAudioToSide(
+      sideLabel,
+      audioBuffer,
+      `Recorded Side ${sideLabel}.wav`,
+      "liveRecording",
+      { gapSummary }
+    );
     await refreshDevices();
     setStatus(`Side ${sideLabel} recorded`);
   } catch (error) {
@@ -456,6 +500,8 @@ async function stopRecording() {
     state.recorder = null;
     state.recordingSide = null;
     state.recordingRolling = null;
+    state.recordingGapListener = null;
+    state.recordingGapSnapshot = null;
     window.clearInterval(state.storageTimer);
     state.storageTimer = 0;
     renderRecordControls();
@@ -478,6 +524,15 @@ function handleRecordingFrame(frame) {
     short_term_average_dbfs: rollingStats.rms_dbfs,
     noise_floor: state.noiseStats?.noise_floor ?? state.project.noiseFloor
   };
+  if (state.recordingGapListener) {
+    const frameSeconds = (frame.channels[0]?.length || 0) / frame.sampleRate;
+    state.recordingGapSnapshot = updateRecordingGapListener(
+      state.recordingGapListener,
+      liveStats,
+      frameSeconds
+    );
+    liveStats.gap_listener = state.recordingGapSnapshot;
+  }
   renderRecordingDiagnostics(liveStats);
 }
 
@@ -489,32 +544,100 @@ async function importSideFile(sideLabel, file) {
     const context = getDecodeContext();
     const data = await file.arrayBuffer();
     const audioBuffer = await context.decodeAudioData(data.slice(0));
-    assignAudioToSide(sideLabel, audioBuffer, file.name, "importedFile");
-    setStatus(`Imported ${file.name}`);
+    const importAnalysis = analyzeImportAudioBuffer(audioBuffer);
+    const cleanupOptions = getImportCleanupOptions();
+    const cleanupResult = cleanupOptions.applyCleanup
+      ? applyImportCleanupToAudioBuffer(audioBuffer, cleanupOptions)
+      : null;
+    const workingBuffer = cleanupResult?.audioBuffer || audioBuffer;
+    assignAudioToSide(sideLabel, workingBuffer, file.name, "importedFile", {
+      originalAudioBuffer: audioBuffer,
+      importAnalysis,
+      importOptimization: cleanupResult?.metadata || {
+        options: cleanupOptions,
+        applied: [],
+        click_repairs: 0,
+        analysis_before: importAnalysis,
+        analysis_after: importAnalysis
+      }
+    });
+    renderImportOptimizationStatus(sideLabel);
+    setStatus(cleanupResult?.metadata.applied.length
+      ? `Imported and optimized ${file.name}`
+      : `Imported ${file.name}`);
   } catch (error) {
     setStatus(`Could not decode ${file.name}: ${error.message}`);
   }
 }
 
-function assignAudioToSide(sideLabel, audioBuffer, sourceName, sourceType) {
+function applyCleanupPreset(preset) {
+  const options = cleanupOptionsForPreset(preset);
+  dom.applyImportCleanupInput.checked = options.applyCleanup;
+  dom.removeDCOffsetInput.checked = options.removeDCOffset;
+  dom.highPassRumbleInput.checked = options.highPassRumble;
+  dom.balanceChannelsInput.checked = options.balanceChannels;
+  dom.gentleDeClickInput.checked = options.gentleDeClick;
+  dom.normalizeImportInput.checked = options.normalizePeaks;
+  renderImportOptimizationStatus();
+}
+
+function getImportCleanupOptions() {
+  return {
+    ...defaultImportCleanupOptions(),
+    preset: dom.cleanupPresetSelect.value,
+    applyCleanup: dom.applyImportCleanupInput.checked,
+    removeDCOffset: dom.removeDCOffsetInput.checked,
+    highPassRumble: dom.highPassRumbleInput.checked,
+    balanceChannels: dom.balanceChannelsInput.checked,
+    gentleDeClick: dom.gentleDeClickInput.checked,
+    normalizePeaks: dom.normalizeImportInput.checked
+  };
+}
+
+function renderImportOptimizationStatus(sideLabel = null) {
+  const side = sideLabel ? sideFor(sideLabel) : null;
+  const optimization = side?.importOptimization;
+  const analysis = side?.importAnalysis;
+  if (!optimization) {
+    dom.importOptimizationStatus.innerHTML = "<strong>Ready</strong><span>Presets are conservative and originals are preserved for Original Recordings export.</span>";
+    return;
+  }
+  const applied = optimization.applied?.length
+    ? optimization.applied.join(", ")
+    : "No cleanup applied";
+  const beforePeak = optimization.analysis_before?.peak_dbfs;
+  const afterPeak = optimization.analysis_after?.peak_dbfs;
+  const recommendations = analysis?.recommendations?.join("; ") || "No extra suggestions";
+  dom.importOptimizationStatus.innerHTML = `<strong>Side ${sideLabel}: ${escapeHTML(applied)}</strong><span>Peak ${formatDB(beforePeak)} -> ${formatDB(afterPeak)}. Noise ${formatDB(analysis?.noise_floor_dbfs)} (${escapeHTML(analysis?.noise_floor_rating || "unknown")}). Clicks found: ${analysis?.click_pop_candidates || 0}; repaired: ${optimization.click_repairs || 0}. Suggested: ${escapeHTML(recommendations)}.</span>`;
+}
+
+function assignAudioToSide(sideLabel, audioBuffer, sourceName, sourceType, options = {}) {
   const side = sideFor(sideLabel);
+  const gapSummary = options.gapSummary || null;
   side.audioBuffer = audioBuffer;
+  side.originalAudioBuffer = options.originalAudioBuffer || null;
   side.sourceName = sourceName;
   side.sourceType = sourceType;
   side.durationSeconds = audioBuffer.duration;
   side.sampleRate = audioBuffer.sampleRate;
   side.channelCount = audioBuffer.numberOfChannels;
-  side.trimStart = 0;
-  side.trimEnd = audioBuffer.duration;
+  side.trimStart = gapSummary?.suggested_trim_start ?? 0;
+  side.trimEnd = gapSummary?.suggested_trim_end ?? audioBuffer.duration;
   side.boundaries = [];
   side.tracks = [];
   side.candidateGaps = [];
   side.effectiveThresholdDB = null;
   side.tracklistAlignment = null;
+  side.recordingGap = gapSummary;
+  side.importAnalysis = options.importAnalysis || null;
+  side.importOptimization = options.importOptimization || null;
   side.recordingStats = qualityStatsFromAudioBuffer(
     audioBuffer,
     state.noiseStats?.noise_floor ?? state.project.noiseFloor
   );
+  if (side.recordingStats && gapSummary) {
+    side.recordingStats.gap_listener = gapSummary;
+  }
   analyzeSide(side);
   reconcileTracks(side);
   render();
@@ -764,7 +887,13 @@ async function exportAlbumZip() {
   for (const track of tracks) {
     const title = effectiveTrackTitle(track.info, track.number);
     const fileName = `${String(track.number).padStart(2, "0")} - ${sanitizeFileName(title)}.wav`;
-    const wav = encodeSegmentToWav(track.side.audioBuffer, track.segment.start, track.segment.end, options);
+    const trackOptions = {
+      ...options,
+      gainLinear: dom.matchLoudnessInput.checked && !options.normalize
+        ? masteringGainForTrack(track.side.audioBuffer, track.segment.start, track.segment.end)
+        : 1
+    };
+    const wav = encodeSegmentToWav(track.side.audioBuffer, track.segment.start, track.segment.end, trackOptions);
     entries.push({ path: `${folder}/${fileName}`, data: wav });
     playlist.push(fileName);
     completed += 1;
@@ -783,7 +912,8 @@ async function exportAlbumZip() {
 
   if (dom.originalsInput.checked) {
     for (const side of recordedSides()) {
-      const wav = encodeAudioBufferToWav(side.audioBuffer, { fadeInMilliseconds: 0, fadeOutMilliseconds: 0 });
+      const originalBuffer = side.originalAudioBuffer || side.audioBuffer;
+      const wav = encodeAudioBufferToWav(originalBuffer, { fadeInMilliseconds: 0, fadeOutMilliseconds: 0 });
       entries.push({ path: `${folder}/Original Recordings/Side ${side.label}.wav`, data: wav });
       completed += 1;
       setExportProgress(completed / totalSteps, `Added Side ${side.label} original`);
@@ -830,6 +960,14 @@ async function loadProjectFile() {
     state.noiseStats = typeof state.project.noiseFloor === "number"
       ? { noise_floor: state.project.noiseFloor }
       : null;
+    if (parsed.exportSettings) {
+      dom.normalizeInput.checked = Boolean(parsed.exportSettings.normalizePeaks);
+      dom.matchLoudnessInput.checked = Boolean(parsed.exportSettings.matchTrackLoudness);
+      dom.playlistInput.checked = parsed.exportSettings.createM3UPlaylist !== false;
+      dom.originalsInput.checked = parsed.exportSettings.copyOriginalRecordings !== false;
+      dom.fadeInInput.value = parsed.exportSettings.fadeInMilliseconds ?? 0;
+      dom.fadeOutInput.value = parsed.exportSettings.fadeOutMilliseconds ?? 15;
+    }
     SIDE_LABELS.forEach((label) => {
       const saved = parsed.sides?.[label] || {};
       const side = state.project.sides[label];
@@ -844,7 +982,10 @@ async function loadProjectFile() {
       side.tracks = Array.isArray(saved.tracks) ? saved.tracks : [];
       side.detectionSettings = saved.detectionSettings || defaultDetectionSettings();
       side.tracklistAlignment = saved.tracklistAlignment || null;
+      side.recordingGap = saved.recordingGap || saved.gap_listener || null;
       side.recordingStats = saved.recordingStats || saved.recording_statistics || null;
+      side.importAnalysis = saved.importAnalysis || null;
+      side.importOptimization = saved.importOptimization || null;
     });
     setStatus("Project metadata loaded");
     render();
@@ -868,6 +1009,14 @@ function serializeProject() {
     hasArtwork: Boolean(state.project.artwork),
     levelCheck: state.project.levelCheck,
     noiseFloor: state.project.noiseFloor,
+    exportSettings: {
+      normalizePeaks: dom.normalizeInput.checked,
+      matchTrackLoudness: dom.matchLoudnessInput.checked,
+      createM3UPlaylist: dom.playlistInput.checked,
+      copyOriginalRecordings: dom.originalsInput.checked,
+      fadeInMilliseconds: Number(dom.fadeInInput.value) || 0,
+      fadeOutMilliseconds: Number(dom.fadeOutInput.value) || 0
+    },
     sides: Object.fromEntries(
       SIDE_LABELS.map((label) => {
         const side = sideFor(label);
@@ -877,6 +1026,7 @@ function serializeProject() {
             sourceName: side.sourceName,
             sourceType: side.sourceType,
             hasAudioInCurrentSession: Boolean(side.audioBuffer),
+            hasOriginalAudioInCurrentSession: Boolean(side.originalAudioBuffer),
             durationSeconds: side.durationSeconds,
             sampleRate: side.sampleRate,
             channelCount: side.channelCount,
@@ -886,6 +1036,9 @@ function serializeProject() {
             tracks: side.tracks,
             detectionSettings: side.detectionSettings,
             tracklistAlignment: side.tracklistAlignment,
+            recordingGap: side.recordingGap,
+            importAnalysis: side.importAnalysis,
+            importOptimization: side.importOptimization,
             recordingStats: side.recordingStats,
             recording_statistics: exportRecordingStatistics(side.recordingStats)
           }
@@ -912,6 +1065,7 @@ function render() {
   renderQualityAnalysis();
   renderRecordControls();
   renderDetectionSettings();
+  renderTracklistAlignmentStatus();
   renderAlbumFields();
   renderArtwork();
   renderTrackViews();
@@ -940,6 +1094,7 @@ function renderRecordControls() {
   dom.stopRecordingButton.disabled = !recording;
   if (!recording) {
     dom.recordingClock.textContent = "00:00";
+    renderRecordingGapStatus(null);
   }
 }
 
@@ -959,6 +1114,28 @@ function renderDetectionSettings() {
     ? "No detection run yet."
     : `${side.tracks.length} tracks, threshold ${formatDB(side.effectiveThresholdDB)}.`;
   dom.detectResultText.textContent = result;
+}
+
+function renderTracklistAlignmentStatus() {
+  const alignment = sideFor(state.detectSide).tracklistAlignment;
+  if (!alignment) {
+    dom.tracklistAlignmentStatus.innerHTML = "<strong>Runtime guidance</strong><span>Paste runtimes to check speed drift and confidence.</span>";
+    return;
+  }
+  const low = alignment.alignments?.filter((item) => item.confidence === "low").length || 0;
+  const medium = alignment.alignments?.filter((item) => item.confidence === "medium").length || 0;
+  const drift = typeof alignment.scale === "number"
+    ? ((1 / alignment.scale - 1) * 100)
+    : null;
+  const driftText = typeof drift === "number"
+    ? `Speed/pitch drift estimate: ${drift >= 0 ? "+" : ""}${drift.toFixed(2)}%.`
+    : "No runtime drift estimate.";
+  const reviewText = low > 0
+    ? `${low} low-confidence split${low === 1 ? "" : "s"} should be reviewed.`
+    : medium > 0
+      ? `${medium} medium-confidence split${medium === 1 ? "" : "s"} worth a quick listen.`
+      : "All runtime-guided splits look strong.";
+  dom.tracklistAlignmentStatus.innerHTML = `<strong>${escapeHTML(alignment.summary)}</strong><span>${escapeHTML(driftText)} ${escapeHTML(reviewText)}</span>`;
 }
 
 function renderAlbumFields() {
@@ -1295,6 +1472,21 @@ function renderRecordingDiagnostics(stats) {
   const score = calculateRecordingScore(stats);
   dom.recordingQualityScore.textContent = `${score.overall} / 100`;
   dom.recordingProblemStatus.textContent = generateProblemSummary(stats);
+  renderRecordingGapStatus(stats.gap_listener || state.recordingGapSnapshot);
+}
+
+function renderRecordingGapStatus(gap) {
+  if (!gap) {
+    dom.recordingGapStatus.textContent = "Waiting";
+    dom.recordingTrimSuggestion.textContent = "Not set";
+    return;
+  }
+  dom.recordingGapStatus.textContent = gap.status;
+  const trimStart = gap.suggestedTrimStart ?? 0;
+  const trimEnd = gap.suggestedTrimEnd;
+  dom.recordingTrimSuggestion.textContent = trimEnd == null
+    ? `Start ${formatTime(trimStart)}`
+    : `${formatTime(trimStart)} - ${formatTime(trimEnd)}`;
 }
 
 async function updateStorageEstimate() {
@@ -1494,8 +1686,33 @@ function exportRecordingStatistics(stats) {
     noise_floor: stats.noise_floor,
     clipping_count: stats.clipping_count,
     hum_detected: stats.hum_detected,
-    stereo_balance: stats.stereo_balance
+    stereo_balance: stats.stereo_balance,
+    gap_listener: stats.gap_listener || null
   };
+}
+
+function masteringGainForTrack(audioBuffer, startSeconds, endSeconds) {
+  const rmsDBFS = segmentRmsDBFS(audioBuffer, startSeconds, endSeconds);
+  if (!Number.isFinite(rmsDBFS)) return 1;
+  const targetDBFS = -20;
+  const gainDB = clamp(targetDBFS - rmsDBFS, -4, 6);
+  return Math.pow(10, gainDB / 20);
+}
+
+function segmentRmsDBFS(audioBuffer, startSeconds, endSeconds) {
+  const startFrame = clamp(Math.floor(startSeconds * audioBuffer.sampleRate), 0, audioBuffer.length);
+  const endFrame = clamp(Math.ceil(endSeconds * audioBuffer.sampleRate), startFrame, audioBuffer.length);
+  if (endFrame <= startFrame) return -120;
+  let sum = 0;
+  let count = 0;
+  for (let channel = 0; channel < audioBuffer.numberOfChannels; channel += 1) {
+    const data = audioBuffer.getChannelData(channel);
+    for (let frame = startFrame; frame < endFrame; frame += 1) {
+      sum += data[frame] * data[frame];
+      count += 1;
+    }
+  }
+  return dbFromPeak(Math.sqrt(sum / Math.max(count, 1)));
 }
 
 function extensionForArtwork(name, type) {

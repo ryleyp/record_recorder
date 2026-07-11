@@ -37,7 +37,7 @@ export function encodeSegmentToWav(audioBuffer, startSeconds, endSeconds, option
 
   const gain = options.normalize
     ? normalizationGain(channelData, startFrame, endFrame, options.normalizeTargetDB ?? -1)
-    : 1;
+    : (options.gainLinear ?? 1);
   const fadeInFrames = Math.min(
     frameCount,
     Math.round(((options.fadeInMilliseconds ?? 0) / 1000) * sampleRate)

@@ -395,6 +395,7 @@ h3 {
 }
 
 .slider-field,
+.tool-panel > label:not(.check-row),
 .details-form label,
 .field-pair label {
   display: grid;

@@ -38,16 +38,22 @@ If Pages has not been enabled yet:
 ## Web Workflow
 
 1. Add music by importing existing side recordings, or continue to level setup
-   before recording through a USB input.
+   before recording through a USB input. Imported recordings can be optimized
+   on the way in with cleanup presets, DC-offset removal, rumble filtering,
+   stereo balance correction, click/pop detection, optional gentle de-click,
+   noise-floor profiling, and optional peak normalization.
 2. Set levels with live stereo meters, peak/RMS readouts, 12-second loudest
    section analysis, 5-second surface-noise measurement, automatic problem
    detection, and a 0-100 recording quality score.
-3. Record Side A/Side B in the browser as lossless audio.
+3. Record Side A/Side B in the browser as lossless audio. During recording,
+   the app listens for lead-in silence and long quiet run-out/flip gaps, then
+   suggests start/end trims while preserving the full original capture.
 4. Run track detection with the conservative, balanced, or aggressive preset.
 5. Optionally paste a tracklist with runtimes or import Audacity label text.
    Runtime-guided splitting scales the listed runtimes to the actual side,
    searches near each expected cut for the best quiet gap, and labels each
-   split as high, medium, or low confidence.
+   split as high, medium, or low confidence. The app also estimates playback
+   speed/pitch drift from the listed runtimes.
 6. Review the waveform and drag trim/cut markers.
 7. Fill in album and track metadata.
 8. Export a ZIP containing WAV tracks, an M3U playlist, artwork, original side
@@ -66,6 +72,11 @@ If Pages has not been enabled yet:
 - Recording diagnostics are saved in `album-project.json`, including peak,
   RMS, dynamic range, noise floor, clipping count, hum detection, and stereo
   balance.
+- Import optimization is non-destructive within the session: the cleaned
+  working copy is used for splitting/export while the untouched import is used
+  for the optional Original Recordings export.
+- Export options include edge fades, optional peak normalization, and gentle
+  per-track loudness matching for a more even album without compression.
 - Project save/load stores metadata, trims, and markers. Audio is kept in the
   current browser session and included in the final ZIP export.
 - Large album sides can use substantial memory while encoding the final ZIP.
