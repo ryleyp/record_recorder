@@ -28,7 +28,12 @@ import {
   mergeQualityStats,
   qualityStatsFromAudioBuffer
 } from "./quality.js";
-import { BrowserRecorder, InputMonitor, listAudioInputs } from "./recorder.js";
+import {
+  BrowserRecorder,
+  InputMonitor,
+  listAudioInputs,
+  requestAudioInputPermission
+} from "./recorder.js";
 import {
   defaultSilenceCropSettings,
   detectLongSilenceRanges,
@@ -239,9 +244,9 @@ function bindEvents() {
     });
   });
 
-  dom.refreshDevicesButton.addEventListener("click", refreshDevices);
-  dom.recordRefreshDevicesButton.addEventListener("click", refreshDevices);
-  dom.dialogRefreshDevicesButton.addEventListener("click", refreshDevices);
+  dom.refreshDevicesButton.addEventListener("click", () => refreshDevices({ requestPermission: true }));
+  dom.recordRefreshDevicesButton.addEventListener("click", () => refreshDevices({ requestPermission: true }));
+  dom.dialogRefreshDevicesButton.addEventListener("click", () => refreshDevices({ requestPermission: true }));
   inputDeviceSelects().forEach((select) => {
     select.addEventListener("change", () => syncInputDeviceSelection(select.value));
   });
@@ -343,15 +348,25 @@ function createSide(label) {
   };
 }
 
-async function refreshDevices() {
+async function refreshDevices(options = {}) {
   try {
     const selectedDeviceId = currentInputDeviceId();
+    if (options.requestPermission) {
+      setStatus("Requesting audio input access");
+      await requestAudioInputPermission();
+    }
     const devices = await listAudioInputs();
     state.inputDevices = devices;
     inputDeviceSelects().forEach((select) => populateInputDeviceSelect(select, devices, selectedDeviceId));
     syncInputDeviceSelection(inputDeviceOptionExists(selectedDeviceId) ? selectedDeviceId : "");
+    if (options.requestPermission) {
+      setStatus(devices.length ? "Audio inputs refreshed" : "Using browser default input");
+    }
+    return true;
   } catch (error) {
     setStatus(error.message);
+    renderRecordingInputStatus(error.message);
+    return false;
   }
 }
 
@@ -409,15 +424,25 @@ function currentInputDeviceLabel() {
   return device?.label || `Input ${index >= 0 ? index + 1 : ""}`.trim();
 }
 
-function renderRecordingInputStatus() {
+function renderRecordingInputStatus(errorMessage = "") {
+  if (errorMessage) {
+    dom.recordInputStatus.textContent = `Input access needed: ${errorMessage}`;
+    dom.recordInputDialogStatus.textContent = "Allow audio input access, then choose the turntable or interface input.";
+    return;
+  }
   const label = currentInputDeviceLabel();
-  const message = `Selected input: ${label}. Confirm this source when starting a recording.`;
+  const message = state.inputDevices.length
+    ? `Selected input: ${label}. Confirm this source when starting a recording.`
+    : "Selected input: Default input. Click Refresh and allow audio input access to choose a specific source.";
   dom.recordInputStatus.textContent = message;
-  dom.recordInputDialogStatus.textContent = `Recording will use: ${label}.`;
+  dom.recordInputDialogStatus.textContent = state.inputDevices.length
+    ? `Recording will use: ${label}.`
+    : "If your USB turntable is not listed, click Refresh and allow audio input access.";
 }
 
 async function promptForRecordingInput(sideLabel) {
-  await refreshDevices();
+  const refreshed = await refreshDevices({ requestPermission: true });
+  if (!refreshed) return null;
   dom.recordInputSideText.textContent = `Side ${sideLabel}`;
   renderRecordingInputStatus();
 

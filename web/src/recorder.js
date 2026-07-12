@@ -2,6 +2,19 @@ import { dbFromPeak } from "./utils.js";
 
 const BUFFER_SIZE = 1024;
 
+function audioInputConstraints(deviceId = "") {
+  const audio = {
+    channelCount: { ideal: 2 },
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false
+  };
+  if (deviceId) {
+    audio.deviceId = { exact: deviceId };
+  }
+  return audio;
+}
+
 export class BrowserRecorder {
   constructor({ onFrame, onMeter, onTick } = {}) {
     this.onFrame = onFrame || (() => {});
@@ -24,17 +37,10 @@ export class BrowserRecorder {
       throw new Error("Audio recording requires a browser with microphone input support.");
     }
 
-    const audio = {
-      channelCount: { ideal: 2 },
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false
-    };
-    if (deviceId) {
-      audio.deviceId = { exact: deviceId };
-    }
-
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: audioInputConstraints(deviceId),
+      video: false
+    });
     this.context = new AudioContext();
     this.sampleRate = this.context.sampleRate;
     this.source = this.context.createMediaStreamSource(this.stream);
@@ -130,17 +136,11 @@ export class InputMonitor {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error("Input monitoring requires a browser with microphone input support.");
     }
-    const audio = {
-      channelCount: { ideal: 2 },
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false
-    };
-    if (deviceId) {
-      audio.deviceId = { exact: deviceId };
-    }
 
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: audioInputConstraints(deviceId),
+      video: false
+    });
     this.context = new AudioContext();
     this.sampleRate = this.context.sampleRate;
     this.source = this.context.createMediaStreamSource(this.stream);
@@ -195,4 +195,15 @@ export async function listAudioInputs() {
   }
   const devices = await navigator.mediaDevices.enumerateDevices();
   return devices.filter((device) => device.kind === "audioinput");
+}
+
+export async function requestAudioInputPermission() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Audio input selection requires a browser with microphone input support.");
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: audioInputConstraints(),
+    video: false
+  });
+  stream.getTracks().forEach((track) => track.stop());
 }
