@@ -210,6 +210,12 @@
         <div class="record-layout">
           <section class="tool-panel">
             <h3>Capture</h3>
+            <div class="field-row">
+              <label for="recordInputDeviceSelect">Input</label>
+              <select id="recordInputDeviceSelect"></select>
+              <button id="recordRefreshDevicesButton" type="button">Refresh</button>
+            </div>
+            <p class="fine-print" id="recordInputStatus">Select the input source before recording.</p>
             <div class="record-controls">
               <button id="recordSideAButton" class="danger" type="button">Record Side A</button>
               <button id="recordSideBButton" class="danger" type="button">Record Side B</button>
@@ -373,11 +379,21 @@
             <h3>Options</h3>
             <label class="check-row"><input id="normalizeInput" type="checkbox"> Peak normalize</label>
             <label class="check-row"><input id="matchLoudnessInput" type="checkbox"> Match track loudness gently</label>
+            <label class="check-row"><input id="cropLongSilenceInput" type="checkbox"> Crop long silence</label>
             <label class="check-row"><input id="playlistInput" type="checkbox" checked> M3U playlist</label>
             <label class="check-row"><input id="originalsInput" type="checkbox" checked> Original side WAVs</label>
             <div class="field-pair">
               <label>Fade in (ms) <input id="fadeInInput" type="number" min="0" max="5000" value="0"></label>
               <label>Fade out (ms) <input id="fadeOutInput" type="number" min="0" max="5000" value="15"></label>
+            </div>
+            <div class="field-pair export-crop-fields">
+              <label>Silence below (dBFS) <input id="cropSilenceThresholdInput" type="number" min="-80" max="-20" step="1" value="-50"></label>
+              <label>Minimum length (s) <input id="cropSilenceMinimumInput" type="number" min="2" max="60" step="0.5" value="4"></label>
+              <label>Keep padding (s) <input id="cropSilencePaddingInput" type="number" min="0" max="3" step="0.05" value="0.35"></label>
+            </div>
+            <div class="noise-card" id="silenceCropStatus">
+              <strong>Long silence crop off</strong>
+              <span>Original track timing is preserved during export.</span>
             </div>
             <button id="exportButton" class="primary" type="button">Export ZIP</button>
           </section>
@@ -400,6 +416,22 @@
         <input class="track-artist-input" type="text" autocomplete="off" placeholder="Artist override">
       </div>
     </template>
+
+    <dialog id="recordInputDialog" class="input-dialog">
+      <form method="dialog">
+        <h3>Select Recording Input</h3>
+        <p>Choose the source for <strong id="recordInputSideText">Side A</strong> before recording.</p>
+        <label>Input
+          <select id="dialogInputDeviceSelect"></select>
+        </label>
+        <p class="fine-print" id="recordInputDialogStatus">Choose the turntable or audio interface input.</p>
+        <div class="button-row">
+          <button id="dialogRefreshDevicesButton" type="button">Refresh</button>
+          <button type="submit" value="cancel">Cancel</button>
+          <button class="primary" type="submit" value="confirm">Start Recording</button>
+        </div>
+      </form>
+    </dialog>
 
     <script type="module" src="./src/app.js"></script>
   </body>

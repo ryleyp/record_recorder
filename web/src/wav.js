@@ -1,4 +1,5 @@
 import { clamp } from "./utils.js";
+import { subtractSkipRanges } from "./silenceCrop.js";
 
 export function encodeAudioBufferToWav(audioBuffer, options = {}) {
   return encodeSegmentToWav(audioBuffer, 0, audioBuffer.duration, options);
@@ -7,9 +8,15 @@ export function encodeAudioBufferToWav(audioBuffer, options = {}) {
 export function encodeSegmentToWav(audioBuffer, startSeconds, endSeconds, options = {}) {
   const sampleRate = audioBuffer.sampleRate;
   const channelCount = audioBuffer.numberOfChannels;
-  const startFrame = clamp(Math.floor(startSeconds * sampleRate), 0, audioBuffer.length);
-  const endFrame = clamp(Math.ceil(endSeconds * sampleRate), startFrame, audioBuffer.length);
-  const frameCount = Math.max(0, endFrame - startFrame);
+  const keepRanges = subtractSkipRanges(startSeconds, endSeconds, options.skipRanges || []);
+  const frameRanges = keepRanges
+    .map((range) => {
+      const startFrame = clamp(Math.floor(range.start * sampleRate), 0, audioBuffer.length);
+      const endFrame = clamp(Math.ceil(range.end * sampleRate), startFrame, audioBuffer.length);
+      return { startFrame, endFrame };
+    })
+    .filter((range) => range.endFrame > range.startFrame);
+  const frameCount = frameRanges.reduce((sum, range) => sum + range.endFrame - range.startFrame, 0);
   const bytesPerSample = 2;
   const blockAlign = channelCount * bytesPerSample;
   const dataSize = frameCount * blockAlign;
@@ -36,7 +43,7 @@ export function encodeSegmentToWav(audioBuffer, startSeconds, endSeconds, option
   }
 
   const gain = options.normalize
-    ? normalizationGain(channelData, startFrame, endFrame, options.normalizeTargetDB ?? -1)
+    ? normalizationGain(channelData, frameRanges, options.normalizeTargetDB ?? -1)
     : (options.gainLinear ?? 1);
   const fadeInFrames = Math.min(
     frameCount,
@@ -48,30 +55,36 @@ export function encodeSegmentToWav(audioBuffer, startSeconds, endSeconds, option
   );
 
   let offset = 44;
-  for (let frame = 0; frame < frameCount; frame += 1) {
-    let fadeGain = 1;
-    if (fadeInFrames > 0 && frame < fadeInFrames) {
-      fadeGain = Math.min(fadeGain, frame / fadeInFrames);
-    }
-    if (fadeOutFrames > 0 && frame >= frameCount - fadeOutFrames) {
-      fadeGain = Math.min(fadeGain, (frameCount - frame - 1) / fadeOutFrames);
-    }
-    for (let channel = 0; channel < channelCount; channel += 1) {
-      const sample = clamp(channelData[channel][startFrame + frame] * gain * fadeGain, -1, 1);
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-      offset += 2;
+  let outputFrame = 0;
+  for (const range of frameRanges) {
+    for (let sourceFrame = range.startFrame; sourceFrame < range.endFrame; sourceFrame += 1) {
+      let fadeGain = 1;
+      if (fadeInFrames > 0 && outputFrame < fadeInFrames) {
+        fadeGain = Math.min(fadeGain, outputFrame / fadeInFrames);
+      }
+      if (fadeOutFrames > 0 && outputFrame >= frameCount - fadeOutFrames) {
+        fadeGain = Math.min(fadeGain, (frameCount - outputFrame - 1) / fadeOutFrames);
+      }
+      for (let channel = 0; channel < channelCount; channel += 1) {
+        const sample = clamp(channelData[channel][sourceFrame] * gain * fadeGain, -1, 1);
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+        offset += 2;
+      }
+      outputFrame += 1;
     }
   }
 
   return new Uint8Array(buffer);
 }
 
-function normalizationGain(channelData, startFrame, endFrame, targetDB) {
+function normalizationGain(channelData, frameRanges, targetDB) {
   let peak = 0;
   for (const channel of channelData) {
-    for (let frame = startFrame; frame < endFrame; frame += 1) {
-      const value = Math.abs(channel[frame]);
-      if (value > peak) peak = value;
+    for (const range of frameRanges) {
+      for (let frame = range.startFrame; frame < range.endFrame; frame += 1) {
+        const value = Math.abs(channel[frame]);
+        if (value > peak) peak = value;
+      }
     }
   }
   if (peak <= 0) return 1;

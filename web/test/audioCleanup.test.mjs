@@ -80,6 +80,29 @@ test("import analysis reports click candidates and recommendations", () => {
   assert.ok(analysis.recommendations.some((item) => item.includes("de-click")));
 });
 
+test("click detection catches smaller vinyl crackles", () => {
+  const samples = sine(48000, 440, 1, 0.08);
+  samples[1600] += 0.16;
+  samples[9000] -= 0.15;
+
+  const result = optimizeImportChannelData([samples], 48000, {
+    removeDCOffset: false,
+    highPassRumble: false,
+    balanceChannels: false,
+    gentleDeClick: true,
+    normalizePeaks: false
+  });
+
+  assert.ok(detectClickPopCandidates([samples]) >= 2);
+  assert.ok(result.clickRepairs >= 2);
+});
+
+test("click detection ignores smooth high-frequency content", () => {
+  const samples = sine(48000, 8000, 1, 0.45);
+
+  assert.equal(detectClickPopCandidates([samples]), 0);
+});
+
 test("surface noise profile rates quiet windows", () => {
   const noisy = new Float32Array(48000 * 2);
   for (let index = 0; index < noisy.length; index += 1) {

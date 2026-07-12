@@ -1,5 +1,9 @@
 import { clamp, dbFromPeak } from "./utils.js";
 
+const CLICK_DELTA_THRESHOLD = 0.12;
+const CLICK_NEIGHBOR_THRESHOLD = 0.16;
+const CLICK_LOCAL_MOTION_RATIO = 0.55;
+
 export function defaultImportCleanupOptions() {
   return {
     applyCleanup: true,
@@ -212,10 +216,7 @@ export function detectClickPopCandidates(channelData) {
   let count = 0;
   for (const channel of channels) {
     for (let index = 2; index < channel.length - 2; index += 1) {
-      const local = (channel[index - 2] + channel[index - 1] + channel[index + 1] + channel[index + 2]) / 4;
-      const delta = Math.abs(channel[index] - local);
-      const neighborDelta = Math.abs(channel[index - 1] - channel[index + 1]);
-      if (delta > 0.28 && neighborDelta < 0.18) {
+      if (clickCandidateAt(channel, index)) {
         count += 1;
       }
     }
@@ -290,15 +291,33 @@ function balanceStereoChannels(channels) {
 function gentleDeClick(channel) {
   let repairs = 0;
   for (let index = 2; index < channel.length - 2; index += 1) {
-    const local = (channel[index - 2] + channel[index - 1] + channel[index + 1] + channel[index + 2]) / 4;
-    const delta = Math.abs(channel[index] - local);
-    const neighborDelta = Math.abs(channel[index - 1] - channel[index + 1]);
-    if (delta > 0.28 && neighborDelta < 0.18) {
+    if (clickCandidateAt(channel, index)) {
+      const local = localClickReplacement(channel, index);
       channel[index] = local;
       repairs += 1;
     }
   }
   return repairs;
+}
+
+function clickCandidateAt(channel, index) {
+  const local = localClickReplacement(channel, index);
+  const delta = Math.abs(channel[index] - local);
+  if (delta < CLICK_DELTA_THRESHOLD) return false;
+
+  const neighborDelta = Math.abs(channel[index - 1] - channel[index + 1]);
+  if (neighborDelta > CLICK_NEIGHBOR_THRESHOLD && neighborDelta > delta * 0.75) return false;
+
+  const localMotion = (
+    Math.abs(channel[index - 2] - channel[index - 1]) +
+    Math.abs(channel[index - 1] - channel[index + 1]) +
+    Math.abs(channel[index + 1] - channel[index + 2])
+  ) / 3;
+  return localMotion <= delta * CLICK_LOCAL_MOTION_RATIO;
+}
+
+function localClickReplacement(channel, index) {
+  return (channel[index - 2] + channel[index - 1] + channel[index + 1] + channel[index + 2]) / 4;
 }
 
 function normalizationGain(channels, targetDBFS) {

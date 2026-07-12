@@ -57,7 +57,8 @@ If Pages has not been enabled yet:
 6. Review the waveform and drag trim/cut markers.
 7. Fill in album and track metadata.
 8. Export a ZIP containing WAV tracks, an M3U playlist, artwork, original side
-   WAVs, and `album-project.json`.
+   WAVs, and `album-project.json`. Export can optionally crop long quiet
+   sections from track WAVs while preserving the untouched side recordings.
 
 ## Browser Notes
 
@@ -75,8 +76,10 @@ If Pages has not been enabled yet:
 - Import optimization is non-destructive within the session: the cleaned
   working copy is used for splitting/export while the untouched import is used
   for the optional Original Recordings export.
-- Export options include edge fades, optional peak normalization, and gentle
-  per-track loudness matching for a more even album without compression.
+- Export options include edge fades, optional peak normalization, gentle
+  per-track loudness matching for a more even album without compression, and
+  optional long-silence cropping with threshold, minimum length, and padding
+  controls.
 - Project save/load stores metadata, trims, and markers. Audio is kept in the
   current browser session and included in the final ZIP export.
 - Large album sides can use substantial memory while encoding the final ZIP.

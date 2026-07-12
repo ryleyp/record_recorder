@@ -605,6 +605,14 @@ h3 {
   gap: 12px;
 }
 
+.export-crop-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.export-crop-fields input {
+  min-width: 0;
+}
+
 .check-row {
   display: flex;
   align-items: center;
@@ -703,6 +711,38 @@ h3 {
   font-weight: 780;
 }
 
+.input-dialog {
+  width: min(440px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0;
+  color: var(--ink);
+  background: var(--panel);
+  box-shadow: 0 28px 70px rgba(24, 35, 29, 0.25);
+}
+
+.input-dialog::backdrop {
+  background: rgba(24, 35, 29, 0.38);
+}
+
+.input-dialog form {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.input-dialog h3,
+.input-dialog p {
+  margin: 0;
+}
+
+.input-dialog label {
+  display: grid;
+  gap: 7px;
+  font-size: 0.92rem;
+  font-weight: 650;
+}
+
 .target-bands {
   display: grid;
   gap: 8px;
@@ -796,7 +836,8 @@ h3 {
   .levels-layout,
   .record-layout,
   .import-grid,
-  .field-pair {
+  .field-pair,
+  .export-crop-fields {
     grid-template-columns: 1fr;
   }
 

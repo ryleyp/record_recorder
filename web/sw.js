@@ -1,4 +1,4 @@
-const CACHE_NAME = "vinyl-album-recorder-v1";
+const CACHE_NAME = "vinyl-album-recorder-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -11,6 +11,7 @@ const ASSETS = [
   "./src/gapListener.js",
   "./src/quality.js",
   "./src/recorder.js",
+  "./src/silenceCrop.js",
   "./src/utils.js",
   "./src/wav.js",
   "./src/zip.js"

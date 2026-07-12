@@ -29,6 +29,11 @@ import {
   qualityStatsFromAudioBuffer
 } from "./quality.js";
 import { BrowserRecorder, InputMonitor, listAudioInputs } from "./recorder.js";
+import {
+  defaultSilenceCropSettings,
+  detectLongSilenceRanges,
+  summarizeSilenceCrop
+} from "./silenceCrop.js";
 import { encodeAudioBufferToWav, encodeSegmentToWav } from "./wav.js";
 import { createZip } from "./zip.js";
 import {
@@ -62,6 +67,9 @@ const state = {
   recordingGapListener: null,
   recordingGapSnapshot: null,
   recordingClipCount: 0,
+  lastSilenceCropSummary: null,
+  inputDevices: [],
+  selectedInputDeviceId: "",
   storageTimer: 0,
   recorder: null,
   recordingSide: null,
@@ -86,6 +94,9 @@ const dom = {
   recordSideAButton: byId("recordSideAButton"),
   recordSideBButton: byId("recordSideBButton"),
   stopRecordingButton: byId("stopRecordingButton"),
+  recordInputDeviceSelect: byId("recordInputDeviceSelect"),
+  recordRefreshDevicesButton: byId("recordRefreshDevicesButton"),
+  recordInputStatus: byId("recordInputStatus"),
   recordingClock: byId("recordingClock"),
   recordingStorage: byId("recordingStorage"),
   recordingClipCount: byId("recordingClipCount"),
@@ -162,6 +173,11 @@ const dom = {
   albumTrackList: byId("albumTrackList"),
   normalizeInput: byId("normalizeInput"),
   matchLoudnessInput: byId("matchLoudnessInput"),
+  cropLongSilenceInput: byId("cropLongSilenceInput"),
+  cropSilenceThresholdInput: byId("cropSilenceThresholdInput"),
+  cropSilenceMinimumInput: byId("cropSilenceMinimumInput"),
+  cropSilencePaddingInput: byId("cropSilencePaddingInput"),
+  silenceCropStatus: byId("silenceCropStatus"),
   playlistInput: byId("playlistInput"),
   originalsInput: byId("originalsInput"),
   fadeInInput: byId("fadeInInput"),
@@ -169,7 +185,12 @@ const dom = {
   exportButton: byId("exportButton"),
   exportTrackList: byId("exportTrackList"),
   exportProgress: byId("exportProgress"),
-  exportStatus: byId("exportStatus")
+  exportStatus: byId("exportStatus"),
+  recordInputDialog: byId("recordInputDialog"),
+  dialogInputDeviceSelect: byId("dialogInputDeviceSelect"),
+  dialogRefreshDevicesButton: byId("dialogRefreshDevicesButton"),
+  recordInputSideText: byId("recordInputSideText"),
+  recordInputDialogStatus: byId("recordInputDialogStatus")
 };
 
 bindEvents();
@@ -219,6 +240,11 @@ function bindEvents() {
   });
 
   dom.refreshDevicesButton.addEventListener("click", refreshDevices);
+  dom.recordRefreshDevicesButton.addEventListener("click", refreshDevices);
+  dom.dialogRefreshDevicesButton.addEventListener("click", refreshDevices);
+  inputDeviceSelects().forEach((select) => {
+    select.addEventListener("change", () => syncInputDeviceSelection(select.value));
+  });
   dom.startMonitorButton.addEventListener("click", startMonitoring);
   dom.stopMonitorButton.addEventListener("click", stopMonitoring);
   dom.analyzeLevelsButton.addEventListener("click", analyzeLoudestSection);
@@ -256,6 +282,12 @@ function bindEvents() {
   dom.reviewTrackList.addEventListener("input", handleTrackInput);
   dom.albumTrackList.addEventListener("input", handleTrackInput);
   dom.exportButton.addEventListener("click", exportAlbumZip);
+  [
+    dom.cropLongSilenceInput,
+    dom.cropSilenceThresholdInput,
+    dom.cropSilenceMinimumInput,
+    dom.cropSilencePaddingInput
+  ].forEach((input) => input.addEventListener("input", updateSilenceCropSettings));
 
   dom.waveformCanvas.addEventListener("pointerdown", handleWaveformPointerDown);
   dom.waveformCanvas.addEventListener("pointermove", handleWaveformPointerMove);
@@ -313,24 +345,105 @@ function createSide(label) {
 
 async function refreshDevices() {
   try {
+    const selectedDeviceId = currentInputDeviceId();
     const devices = await listAudioInputs();
-    dom.inputDeviceSelect.innerHTML = "";
-    if (!devices.length) {
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = "Default input";
-      dom.inputDeviceSelect.append(option);
-      return;
-    }
-    devices.forEach((device, index) => {
-      const option = document.createElement("option");
-      option.value = device.deviceId;
-      option.textContent = device.label || `Input ${index + 1}`;
-      dom.inputDeviceSelect.append(option);
-    });
+    state.inputDevices = devices;
+    inputDeviceSelects().forEach((select) => populateInputDeviceSelect(select, devices, selectedDeviceId));
+    syncInputDeviceSelection(inputDeviceOptionExists(selectedDeviceId) ? selectedDeviceId : "");
   } catch (error) {
     setStatus(error.message);
   }
+}
+
+function inputDeviceSelects() {
+  return [
+    dom.inputDeviceSelect,
+    dom.recordInputDeviceSelect,
+    dom.dialogInputDeviceSelect
+  ].filter(Boolean);
+}
+
+function populateInputDeviceSelect(select, devices, selectedDeviceId) {
+  select.innerHTML = "";
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Default input";
+  select.append(defaultOption);
+
+  devices.forEach((device, index) => {
+    const option = document.createElement("option");
+    option.value = device.deviceId;
+    option.textContent = device.label || `Input ${index + 1}`;
+    select.append(option);
+  });
+
+  select.value = inputDeviceOptionExists(selectedDeviceId) ? selectedDeviceId : "";
+}
+
+function inputDeviceOptionExists(deviceId) {
+  return !deviceId || state.inputDevices.some((device) => device.deviceId === deviceId);
+}
+
+function syncInputDeviceSelection(deviceId) {
+  state.selectedInputDeviceId = inputDeviceOptionExists(deviceId) ? deviceId : "";
+  inputDeviceSelects().forEach((select) => {
+    if ([...select.options].some((option) => option.value === state.selectedInputDeviceId)) {
+      select.value = state.selectedInputDeviceId;
+    }
+  });
+  renderRecordingInputStatus();
+}
+
+function currentInputDeviceId() {
+  return state.selectedInputDeviceId
+    || dom.recordInputDeviceSelect?.value
+    || dom.inputDeviceSelect?.value
+    || "";
+}
+
+function currentInputDeviceLabel() {
+  const deviceId = currentInputDeviceId();
+  if (!deviceId) return "Default input";
+  const index = state.inputDevices.findIndex((device) => device.deviceId === deviceId);
+  const device = state.inputDevices[index];
+  return device?.label || `Input ${index >= 0 ? index + 1 : ""}`.trim();
+}
+
+function renderRecordingInputStatus() {
+  const label = currentInputDeviceLabel();
+  const message = `Selected input: ${label}. Confirm this source when starting a recording.`;
+  dom.recordInputStatus.textContent = message;
+  dom.recordInputDialogStatus.textContent = `Recording will use: ${label}.`;
+}
+
+async function promptForRecordingInput(sideLabel) {
+  await refreshDevices();
+  dom.recordInputSideText.textContent = `Side ${sideLabel}`;
+  renderRecordingInputStatus();
+
+  if (typeof dom.recordInputDialog.showModal !== "function") {
+    const ok = window.confirm(`Record Side ${sideLabel} using ${currentInputDeviceLabel()}?`);
+    if (!ok) {
+      setStatus("Recording canceled. Choose the correct input and press Record again.");
+      return null;
+    }
+    return currentInputDeviceId();
+  }
+
+  return new Promise((resolve) => {
+    const handleClose = () => {
+      if (dom.recordInputDialog.returnValue === "confirm") {
+        syncInputDeviceSelection(dom.dialogInputDeviceSelect.value);
+        resolve(currentInputDeviceId());
+        return;
+      }
+      setStatus("Recording canceled. Choose the correct input and press Record again.");
+      resolve(null);
+    };
+    dom.recordInputDialog.addEventListener("close", handleClose, { once: true });
+    dom.recordInputDialog.returnValue = "";
+    dom.recordInputDialog.showModal();
+  });
 }
 
 async function startMonitoring() {
@@ -339,7 +452,7 @@ async function startMonitoring() {
     setStatus("Monitoring input");
     state.monitorRolling = null;
     state.monitor = new InputMonitor({ onFrame: handleMonitorFrame });
-    await state.monitor.start(dom.inputDeviceSelect.value);
+    await state.monitor.start(currentInputDeviceId());
     renderMonitorControls();
     await refreshDevices();
   } catch (error) {
@@ -447,6 +560,8 @@ function createTimedCapture(type, seconds) {
 
 async function startRecording(sideLabel) {
   if (state.recorder) return;
+  const deviceId = await promptForRecordingInput(sideLabel);
+  if (deviceId == null) return;
   try {
     if (state.monitor) {
       await stopMonitoring();
@@ -467,7 +582,7 @@ async function startRecording(sideLabel) {
         updateStorageEstimate();
       }
     });
-    await state.recorder.start(dom.inputDeviceSelect.value);
+    await state.recorder.start(deviceId);
     updateStorageEstimate();
     renderRecordControls();
   } catch (error) {
@@ -609,6 +724,41 @@ function renderImportOptimizationStatus(sideLabel = null) {
   const afterPeak = optimization.analysis_after?.peak_dbfs;
   const recommendations = analysis?.recommendations?.join("; ") || "No extra suggestions";
   dom.importOptimizationStatus.innerHTML = `<strong>Side ${sideLabel}: ${escapeHTML(applied)}</strong><span>Peak ${formatDB(beforePeak)} -> ${formatDB(afterPeak)}. Noise ${formatDB(analysis?.noise_floor_dbfs)} (${escapeHTML(analysis?.noise_floor_rating || "unknown")}). Clicks found: ${analysis?.click_pop_candidates || 0}; repaired: ${optimization.click_repairs || 0}. Suggested: ${escapeHTML(recommendations)}.</span>`;
+}
+
+function updateSilenceCropSettings() {
+  state.lastSilenceCropSummary = null;
+  renderSilenceCropStatus();
+}
+
+function getSilenceCropSettings() {
+  const defaults = defaultSilenceCropSettings();
+  return {
+    enabled: dom.cropLongSilenceInput.checked,
+    thresholdDBFS: readNumberInput(dom.cropSilenceThresholdInput, defaults.thresholdDBFS, -80, -20),
+    minimumSilenceSeconds: readNumberInput(dom.cropSilenceMinimumInput, defaults.minimumSilenceSeconds, 2, 60),
+    keepPaddingSeconds: readNumberInput(dom.cropSilencePaddingInput, defaults.keepPaddingSeconds, 0, 3)
+  };
+}
+
+function renderSilenceCropStatus() {
+  const settings = getSilenceCropSettings();
+  if (!settings.enabled) {
+    dom.silenceCropStatus.innerHTML = "<strong>Long silence crop off</strong><span>Original track timing is preserved during export.</span>";
+    return;
+  }
+
+  const summary = state.lastSilenceCropSummary;
+  const message = summary?.count
+    ? `Last export removed ${formatTime(summary.removedSeconds)} across ${summary.count} quiet range${summary.count === 1 ? "" : "s"}.`
+    : `Export will remove quiet runs longer than ${settings.minimumSilenceSeconds.toFixed(1)} s below ${formatDB(settings.thresholdDBFS)}, keeping ${settings.keepPaddingSeconds.toFixed(2)} s at each edge.`;
+  dom.silenceCropStatus.innerHTML = `<strong>Long silence crop on</strong><span>${escapeHTML(message)}</span>`;
+}
+
+function readNumberInput(input, fallback, low, high) {
+  const value = Number(input.value);
+  if (!Number.isFinite(value)) return fallback;
+  return clamp(value, low, high);
 }
 
 function assignAudioToSide(sideLabel, audioBuffer, sourceName, sourceType, options = {}) {
@@ -871,6 +1021,8 @@ async function exportAlbumZip() {
   const artistName = sanitizeFileName(state.project.albumArtist, "Unknown Artist");
   const folder = `${artistName}/${albumName}`;
   const entries = [];
+  const cropSettings = getSilenceCropSettings();
+  state.lastSilenceCropSummary = null;
   const options = {
     normalize: dom.normalizeInput.checked,
     normalizeTargetDB: -1,
@@ -879,6 +1031,7 @@ async function exportAlbumZip() {
   };
   const totalSteps = tracks.length + (dom.originalsInput.checked ? recordedSides().length : 0) + 3;
   let completed = 0;
+  const cropSummary = { count: 0, removedSeconds: 0 };
 
   setExportProgress(0, "Preparing audio");
   await nextFrame();
@@ -887,8 +1040,15 @@ async function exportAlbumZip() {
   for (const track of tracks) {
     const title = effectiveTrackTitle(track.info, track.number);
     const fileName = `${String(track.number).padStart(2, "0")} - ${sanitizeFileName(title)}.wav`;
+    const skipRanges = cropSettings.enabled
+      ? detectLongSilenceRanges(track.side.audioBuffer, cropSettings, track.segment.start, track.segment.end)
+      : [];
+    const trackCropSummary = summarizeSilenceCrop(skipRanges);
+    cropSummary.count += trackCropSummary.count;
+    cropSummary.removedSeconds += trackCropSummary.removedSeconds;
     const trackOptions = {
       ...options,
+      skipRanges,
       gainLinear: dom.matchLoudnessInput.checked && !options.normalize
         ? masteringGainForTrack(track.side.audioBuffer, track.segment.start, track.segment.end)
         : 1
@@ -897,9 +1057,15 @@ async function exportAlbumZip() {
     entries.push({ path: `${folder}/${fileName}`, data: wav });
     playlist.push(fileName);
     completed += 1;
-    setExportProgress(completed / totalSteps, `Encoded ${fileName}`);
+    const cropText = trackCropSummary.removedSeconds > 0
+      ? `, cropped ${formatTime(trackCropSummary.removedSeconds)}`
+      : "";
+    setExportProgress(completed / totalSteps, `Encoded ${fileName}${cropText}`);
     await nextFrame();
   }
+
+  state.lastSilenceCropSummary = cropSummary;
+  renderSilenceCropStatus();
 
   if (dom.playlistInput.checked) {
     entries.push({ path: `${folder}/${albumName}.m3u`, data: playlist.join("\n") + "\n" });
@@ -930,8 +1096,11 @@ async function exportAlbumZip() {
   await nextFrame();
   const zip = createZip(entries);
   downloadBlob(zip, `${albumName}.zip`);
-  setExportProgress(1, `Exported ${tracks.length} tracks`);
-  setStatus(`Exported ${albumName}.zip`);
+  const cropText = cropSettings.enabled && cropSummary.removedSeconds > 0
+    ? `; cropped ${formatTime(cropSummary.removedSeconds)} silence`
+    : "";
+  setExportProgress(1, `Exported ${tracks.length} tracks${cropText}`);
+  setStatus(`Exported ${albumName}.zip${cropText}`);
 }
 
 function saveProjectFile() {
@@ -948,6 +1117,7 @@ async function loadProjectFile() {
   try {
     const parsed = JSON.parse(await file.text());
     state.project = createProject();
+    state.lastSilenceCropSummary = null;
     state.project.albumTitle = parsed.albumTitle || "";
     state.project.albumArtist = parsed.albumArtist || "";
     state.project.year = parsed.year || "";
@@ -961,8 +1131,14 @@ async function loadProjectFile() {
       ? { noise_floor: state.project.noiseFloor }
       : null;
     if (parsed.exportSettings) {
+      const defaultCrop = defaultSilenceCropSettings();
       dom.normalizeInput.checked = Boolean(parsed.exportSettings.normalizePeaks);
       dom.matchLoudnessInput.checked = Boolean(parsed.exportSettings.matchTrackLoudness);
+      dom.cropLongSilenceInput.checked = Boolean(parsed.exportSettings.cropLongSilence);
+      dom.cropSilenceThresholdInput.value = parsed.exportSettings.cropSilenceThresholdDBFS ?? defaultCrop.thresholdDBFS;
+      dom.cropSilenceMinimumInput.value = parsed.exportSettings.cropSilenceMinimumSeconds ?? defaultCrop.minimumSilenceSeconds;
+      dom.cropSilencePaddingInput.value = parsed.exportSettings.cropSilencePaddingSeconds ?? defaultCrop.keepPaddingSeconds;
+      state.lastSilenceCropSummary = parsed.exportSettings.lastSilenceCropExport || null;
       dom.playlistInput.checked = parsed.exportSettings.createM3UPlaylist !== false;
       dom.originalsInput.checked = parsed.exportSettings.copyOriginalRecordings !== false;
       dom.fadeInInput.value = parsed.exportSettings.fadeInMilliseconds ?? 0;
@@ -997,6 +1173,7 @@ async function loadProjectFile() {
 }
 
 function serializeProject() {
+  const cropSettings = getSilenceCropSettings();
   return {
     version: state.project.version,
     savedAt: new Date().toISOString(),
@@ -1012,6 +1189,11 @@ function serializeProject() {
     exportSettings: {
       normalizePeaks: dom.normalizeInput.checked,
       matchTrackLoudness: dom.matchLoudnessInput.checked,
+      cropLongSilence: cropSettings.enabled,
+      cropSilenceThresholdDBFS: cropSettings.thresholdDBFS,
+      cropSilenceMinimumSeconds: cropSettings.minimumSilenceSeconds,
+      cropSilencePaddingSeconds: cropSettings.keepPaddingSeconds,
+      lastSilenceCropExport: state.lastSilenceCropSummary,
       createM3UPlaylist: dom.playlistInput.checked,
       copyOriginalRecordings: dom.originalsInput.checked,
       fadeInMilliseconds: Number(dom.fadeInInput.value) || 0,
@@ -1069,6 +1251,8 @@ function render() {
   renderAlbumFields();
   renderArtwork();
   renderTrackViews();
+  renderSilenceCropStatus();
+  renderRecordingInputStatus();
   requestAnimationFrame(drawWaveform);
 }
 
