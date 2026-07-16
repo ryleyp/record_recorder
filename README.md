@@ -22,6 +22,13 @@ Recording from a USB audio input requires a secure browser context. GitHub
 Pages works because it is HTTPS; local `localhost` also works in modern
 browsers.
 
+## iPad
+
+Use the GitHub Pages HTTPS version in Safari, then choose Share > Add to Home
+Screen for the app-like version. Connect the USB turntable or audio interface
+before opening the app, tap Refresh in Recording Input, allow audio input
+access, and select the source before setting levels or recording.
+
 ## GitHub Pages
 
 This repo includes `.github/workflows/pages.yml`. After the changes are pushed

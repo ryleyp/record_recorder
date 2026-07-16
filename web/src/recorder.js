@@ -2,6 +2,14 @@ import { dbFromPeak } from "./utils.js";
 
 const BUFFER_SIZE = 1024;
 
+function createAudioContext() {
+  const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextConstructor) {
+    throw new Error("Audio recording requires a browser with Web Audio support.");
+  }
+  return new AudioContextConstructor();
+}
+
 function audioInputConstraints(deviceId = "") {
   const audio = {
     channelCount: { ideal: 2 },
@@ -41,7 +49,7 @@ export class BrowserRecorder {
       audio: audioInputConstraints(deviceId),
       video: false
     });
-    this.context = new AudioContext();
+    this.context = createAudioContext();
     this.sampleRate = this.context.sampleRate;
     this.source = this.context.createMediaStreamSource(this.stream);
     this.channelCount = Math.min(2, this.source.channelCount || 2);
@@ -141,7 +149,7 @@ export class InputMonitor {
       audio: audioInputConstraints(deviceId),
       video: false
     });
-    this.context = new AudioContext();
+    this.context = createAudioContext();
     this.sampleRate = this.context.sampleRate;
     this.source = this.context.createMediaStreamSource(this.stream);
     this.channelCount = Math.min(2, this.source.channelCount || 2);

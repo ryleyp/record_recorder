@@ -1,8 +1,12 @@
 {
   "name": "Vinyl Album Recorder",
   "short_name": "Vinyl Recorder",
+  "description": "Record, import, split, clean, and export vinyl album recordings.",
+  "id": "./",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "browser"],
   "background_color": "#f7f7f2",
   "theme_color": "#f7f7f2",
   "icons": [

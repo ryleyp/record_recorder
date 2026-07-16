@@ -100,6 +100,7 @@ const dom = {
   recordSideBButton: byId("recordSideBButton"),
   stopRecordingButton: byId("stopRecordingButton"),
   recordInputDeviceSelect: byId("recordInputDeviceSelect"),
+  recordChangeInputButton: byId("recordChangeInputButton"),
   recordRefreshDevicesButton: byId("recordRefreshDevicesButton"),
   recordInputStatus: byId("recordInputStatus"),
   recordingClock: byId("recordingClock"),
@@ -122,6 +123,9 @@ const dom = {
   gentleDeClickInput: byId("gentleDeClickInput"),
   normalizeImportInput: byId("normalizeImportInput"),
   importOptimizationStatus: byId("importOptimizationStatus"),
+  addInputDeviceSelect: byId("addInputDeviceSelect"),
+  addRefreshDevicesButton: byId("addRefreshDevicesButton"),
+  addInputStatus: byId("addInputStatus"),
   tracklistAlignmentStatus: byId("tracklistAlignmentStatus"),
   sideAFileName: byId("sideAFileName"),
   sideBFileName: byId("sideBFileName"),
@@ -192,8 +196,11 @@ const dom = {
   exportProgress: byId("exportProgress"),
   exportStatus: byId("exportStatus"),
   recordInputDialog: byId("recordInputDialog"),
+  recordInputDialogTitle: byId("recordInputDialogTitle"),
+  recordInputDialogPrompt: byId("recordInputDialogPrompt"),
   dialogInputDeviceSelect: byId("dialogInputDeviceSelect"),
   dialogRefreshDevicesButton: byId("dialogRefreshDevicesButton"),
+  recordInputConfirmButton: byId("recordInputConfirmButton"),
   recordInputSideText: byId("recordInputSideText"),
   recordInputDialogStatus: byId("recordInputDialogStatus")
 };
@@ -245,11 +252,15 @@ function bindEvents() {
   });
 
   dom.refreshDevicesButton.addEventListener("click", () => refreshDevices({ requestPermission: true }));
+  dom.addRefreshDevicesButton.addEventListener("click", () => refreshDevices({ requestPermission: true }));
+  dom.recordChangeInputButton.addEventListener("click", changeRecordingInput);
   dom.recordRefreshDevicesButton.addEventListener("click", () => refreshDevices({ requestPermission: true }));
   dom.dialogRefreshDevicesButton.addEventListener("click", () => refreshDevices({ requestPermission: true }));
   inputDeviceSelects().forEach((select) => {
+    if (select === dom.dialogInputDeviceSelect) return;
     select.addEventListener("change", () => syncInputDeviceSelection(select.value));
   });
+  dom.dialogInputDeviceSelect.addEventListener("change", renderDialogInputSelectionStatus);
   dom.startMonitorButton.addEventListener("click", startMonitoring);
   dom.stopMonitorButton.addEventListener("click", stopMonitoring);
   dom.analyzeLevelsButton.addEventListener("click", analyzeLoudestSection);
@@ -372,6 +383,7 @@ async function refreshDevices(options = {}) {
 
 function inputDeviceSelects() {
   return [
+    dom.addInputDeviceSelect,
     dom.inputDeviceSelect,
     dom.recordInputDeviceSelect,
     dom.dialogInputDeviceSelect
@@ -411,13 +423,17 @@ function syncInputDeviceSelection(deviceId) {
 
 function currentInputDeviceId() {
   return state.selectedInputDeviceId
+    || dom.addInputDeviceSelect?.value
     || dom.recordInputDeviceSelect?.value
     || dom.inputDeviceSelect?.value
     || "";
 }
 
 function currentInputDeviceLabel() {
-  const deviceId = currentInputDeviceId();
+  return inputDeviceLabelForId(currentInputDeviceId());
+}
+
+function inputDeviceLabelForId(deviceId) {
   if (!deviceId) return "Default input";
   const index = state.inputDevices.findIndex((device) => device.deviceId === deviceId);
   const device = state.inputDevices[index];
@@ -426,6 +442,7 @@ function currentInputDeviceLabel() {
 
 function renderRecordingInputStatus(errorMessage = "") {
   if (errorMessage) {
+    dom.addInputStatus.textContent = `Input access needed: ${errorMessage}`;
     dom.recordInputStatus.textContent = `Input access needed: ${errorMessage}`;
     dom.recordInputDialogStatus.textContent = "Allow audio input access, then choose the turntable or interface input.";
     return;
@@ -434,22 +451,50 @@ function renderRecordingInputStatus(errorMessage = "") {
   const message = state.inputDevices.length
     ? `Selected input: ${label}. Confirm this source when starting a recording.`
     : "Selected input: Default input. Click Refresh and allow audio input access to choose a specific source.";
+  dom.addInputStatus.textContent = message;
   dom.recordInputStatus.textContent = message;
+  renderDialogInputSelectionStatus();
+}
+
+function renderDialogInputSelectionStatus() {
+  const label = inputDeviceLabelForId(dom.dialogInputDeviceSelect?.value || currentInputDeviceId());
   dom.recordInputDialogStatus.textContent = state.inputDevices.length
     ? `Recording will use: ${label}.`
     : "If your USB turntable is not listed, click Refresh and allow audio input access.";
 }
 
-async function promptForRecordingInput(sideLabel) {
+function configureRecordingInputDialog(sideLabel, mode) {
+  const recording = mode === "record";
+  dom.recordInputDialogTitle.textContent = recording
+    ? "Select Recording Input"
+    : "Change Recording Input";
+  dom.recordInputSideText.textContent = recording
+    ? `Side ${sideLabel}`
+    : "the next recording";
+  dom.recordInputDialogPrompt.childNodes[0].textContent = "Choose the source for ";
+  dom.recordInputDialogPrompt.childNodes[2].textContent = recording
+    ? " before recording."
+    : ".";
+  dom.recordInputConfirmButton.textContent = recording
+    ? "Start Recording"
+    : "Use Input";
+}
+
+async function promptForRecordingInput(sideLabel, options = {}) {
+  const mode = options.mode || "record";
   const refreshed = await refreshDevices({ requestPermission: true });
   if (!refreshed) return null;
-  dom.recordInputSideText.textContent = `Side ${sideLabel}`;
-  renderRecordingInputStatus();
+  configureRecordingInputDialog(sideLabel, mode);
+  renderDialogInputSelectionStatus();
 
   if (typeof dom.recordInputDialog.showModal !== "function") {
-    const ok = window.confirm(`Record Side ${sideLabel} using ${currentInputDeviceLabel()}?`);
+    const ok = window.confirm(mode === "record"
+      ? `Record Side ${sideLabel} using ${currentInputDeviceLabel()}?`
+      : `Use ${currentInputDeviceLabel()} for future recordings?`);
     if (!ok) {
-      setStatus("Recording canceled. Choose the correct input and press Record again.");
+      setStatus(mode === "record"
+        ? "Recording canceled. Choose the correct input and press Record again."
+        : "Input change canceled.");
       return null;
     }
     return currentInputDeviceId();
@@ -462,13 +507,25 @@ async function promptForRecordingInput(sideLabel) {
         resolve(currentInputDeviceId());
         return;
       }
-      setStatus("Recording canceled. Choose the correct input and press Record again.");
+      setStatus(mode === "record"
+        ? "Recording canceled. Choose the correct input and press Record again."
+        : "Input change canceled.");
       resolve(null);
     };
     dom.recordInputDialog.addEventListener("close", handleClose, { once: true });
     dom.recordInputDialog.returnValue = "";
     dom.recordInputDialog.showModal();
   });
+}
+
+async function changeRecordingInput() {
+  if (state.recorder) {
+    setStatus("Stop recording before changing inputs.");
+    return;
+  }
+  const deviceId = await promptForRecordingInput(null, { mode: "change" });
+  if (deviceId == null) return;
+  setStatus(`Recording input set to ${currentInputDeviceLabel()}`);
 }
 
 async function startMonitoring() {
@@ -967,7 +1024,7 @@ async function playSelectedTrack() {
     : 0;
   const segment = segments[index];
   stopPlayback();
-  state.playbackContext = state.playbackContext || new AudioContext();
+  state.playbackContext = state.playbackContext || createAudioContext();
   const source = state.playbackContext.createBufferSource();
   source.buffer = side.audioBuffer;
   source.connect(state.playbackContext.destination);
@@ -1301,6 +1358,9 @@ function renderRecordControls() {
   dom.recordSideAButton.disabled = recording;
   dom.recordSideBButton.disabled = recording;
   dom.stopRecordingButton.disabled = !recording;
+  dom.recordInputDeviceSelect.disabled = recording;
+  dom.recordChangeInputButton.disabled = recording;
+  dom.recordRefreshDevicesButton.disabled = recording;
   if (!recording) {
     dom.recordingClock.textContent = "00:00";
     renderRecordingGapStatus(null);
@@ -1564,8 +1624,16 @@ function updateMarkerTime(side, marker, time) {
 }
 
 function getDecodeContext() {
-  state.decodeContext = state.decodeContext || new AudioContext();
+  state.decodeContext = state.decodeContext || createAudioContext();
   return state.decodeContext;
+}
+
+function createAudioContext() {
+  const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextConstructor) {
+    throw new Error("This browser does not support Web Audio.");
+  }
+  return new AudioContextConstructor();
 }
 
 function updateMeters(values) {

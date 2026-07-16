@@ -2,11 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#f7f7f2">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Vinyl Recorder">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="format-detection" content="telephone=no">
     <title>Vinyl Album Recorder</title>
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./icons/icon.svg">
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
@@ -83,6 +88,20 @@
             <div class="noise-card" id="importOptimizationStatus">
               <strong>Ready</strong>
               <span>Original imports are preserved for the Original Recordings export.</span>
+            </div>
+          </section>
+
+          <section class="tool-panel">
+            <h3>Recording Input</h3>
+            <div class="record-input-card">
+              <label for="addInputDeviceSelect">Input</label>
+              <select id="addInputDeviceSelect"></select>
+              <button id="addRefreshDevicesButton" type="button">Refresh</button>
+            </div>
+            <p class="fine-print" id="addInputStatus">Select the input source before setting levels or recording.</p>
+            <div class="button-row">
+              <button type="button" class="primary" data-step-shortcut="levels">Set Levels</button>
+              <button type="button" data-step-shortcut="record">Record</button>
             </div>
           </section>
 
@@ -210,10 +229,13 @@
         <div class="record-layout">
           <section class="tool-panel">
             <h3>Capture</h3>
-            <div class="field-row">
+            <div class="field-row input-field-row">
               <label for="recordInputDeviceSelect">Input</label>
               <select id="recordInputDeviceSelect"></select>
-              <button id="recordRefreshDevicesButton" type="button">Refresh</button>
+              <div class="input-actions">
+                <button id="recordChangeInputButton" type="button">Change Input</button>
+                <button id="recordRefreshDevicesButton" type="button">Refresh</button>
+              </div>
             </div>
             <p class="fine-print" id="recordInputStatus">Select the input source before recording.</p>
             <div class="record-controls">
@@ -419,8 +441,8 @@
 
     <dialog id="recordInputDialog" class="input-dialog">
       <form method="dialog">
-        <h3>Select Recording Input</h3>
-        <p>Choose the source for <strong id="recordInputSideText">Side A</strong> before recording.</p>
+        <h3 id="recordInputDialogTitle">Select Recording Input</h3>
+        <p id="recordInputDialogPrompt">Choose the source for <strong id="recordInputSideText">Side A</strong> before recording.</p>
         <label>Input
           <select id="dialogInputDeviceSelect"></select>
         </label>
@@ -428,7 +450,7 @@
         <div class="button-row">
           <button id="dialogRefreshDevicesButton" type="button">Refresh</button>
           <button type="submit" value="cancel">Cancel</button>
-          <button class="primary" type="submit" value="confirm">Start Recording</button>
+          <button id="recordInputConfirmButton" class="primary" type="submit" value="confirm">Start Recording</button>
         </div>
       </form>
     </dialog>
