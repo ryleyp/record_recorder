@@ -43,6 +43,7 @@ import { encodeAudioBufferToWav, encodeSegmentToWav } from "./wav.js";
 import { createZip } from "./zip.js";
 import {
   clamp,
+  cleanTrackTitle,
   dbFromPeak,
   downloadBlob,
   formatDB,
@@ -1128,7 +1129,11 @@ async function exportAlbumZip() {
   const playlist = ["#EXTM3U"];
   const usedTrackFileNames = new Set();
   for (const track of tracks) {
-    const title = cleanExportText(effectiveTrackTitle(track.info, track.number), `Track ${String(track.number).padStart(2, "0")}`);
+    const title = cleanTrackTitle(
+      effectiveTrackTitle(track.info, track.number),
+      `Track ${String(track.number).padStart(2, "0")}`,
+      track.number
+    );
     const artist = trackArtistForExport(track.info);
     const fileName = uniqueTrackFileName(title, usedTrackFileNames);
     const skipRanges = cropSettings.enabled

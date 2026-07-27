@@ -45,6 +45,31 @@ export function sanitizeFileName(name, fallback = "Untitled") {
   return cleaned || fallback;
 }
 
+export function cleanTrackTitle(name, fallback = "Untitled Track", trackNumber = null) {
+  const cleaned = String(name ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const title = stripLeadingTrackNumber(cleaned, trackNumber);
+  return title || fallback;
+}
+
+function stripLeadingTrackNumber(title, trackNumber) {
+  const match = title.match(/^(track\s*)?([A-D])?\s*0*(\d{1,3})(\s*[\.):_\-\u2013\u2014]\s*|\s+)(.+)$/i);
+  if (!match) return title;
+
+  const hasTrackWord = Boolean(match[1]);
+  const hasSideLabel = Boolean(match[2]);
+  const number = Number(match[3]);
+  const separator = match[4] || "";
+  const rest = (match[5] || "").trim();
+  if (!rest) return title;
+
+  const expectedTrackNumber = Number(trackNumber);
+  const expectedMatches = Number.isFinite(expectedTrackNumber) && Math.round(expectedTrackNumber) === number;
+  const hasExplicitSeparator = /[\.):_\-\u2013\u2014]/.test(separator);
+  return hasSideLabel || hasTrackWord || hasExplicitSeparator || expectedMatches ? rest : title;
+}
+
 export function downloadBlob(blob, fileName) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
