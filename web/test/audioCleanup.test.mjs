@@ -55,6 +55,32 @@ test("import cleanup balances uneven stereo channels", () => {
   assert.ok(result.applied.includes("Stereo balance correction"));
 });
 
+test("import analysis reports a missing stereo channel", () => {
+  const left = sine(48000, 440, 1, 0.25);
+  const right = new Float32Array(left.length);
+  const analysis = analyzeImportChannelData([left, right], 48000);
+
+  assert.equal(analysis.disconnected_channel, "R");
+  assert.equal(analysis.channel_imbalance_detected, false);
+  assert.ok(analysis.recommendations.some((item) => item.includes("Repair missing R channel")));
+});
+
+test("import cleanup repairs one-sided stereo imports", () => {
+  const left = sine(48000, 440, 1, 0.25);
+  const right = new Float32Array(left.length);
+  const result = optimizeImportChannelData([left, right], 48000, {
+    removeDCOffset: false,
+    highPassRumble: false,
+    balanceChannels: true,
+    gentleDeClick: false,
+    normalizePeaks: false
+  });
+
+  assert.ok(result.applied.includes("Repair missing R channel"));
+  assert.equal(rms(result.channels[1]) > 0.1, true);
+  assert.ok(Math.abs(rms(result.channels[0]) - rms(result.channels[1])) < 0.001);
+});
+
 test("gentle de-click repairs isolated spikes", () => {
   const samples = sine(48000, 440, 1, 0.1);
   samples[1000] = 0.9;

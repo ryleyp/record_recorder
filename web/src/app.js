@@ -764,7 +764,13 @@ async function importSideFile(sideLabel, file) {
       : `Imported ${file.name}`);
   } catch (error) {
     setStatus(`Could not decode ${file.name}: ${error.message}`);
+  } finally {
+    importInputForSide(sideLabel).value = "";
   }
+}
+
+function importInputForSide(sideLabel) {
+  return sideLabel === "A" ? dom.importSideAInput : dom.importSideBInput;
 }
 
 function applyCleanupPreset(preset) {
@@ -1114,14 +1120,17 @@ async function exportAlbumZip() {
   const totalSteps = tracks.length + (dom.originalsInput.checked ? recordedSides().length : 0) + 3;
   let completed = 0;
   const cropSummary = { count: 0, removedSeconds: 0 };
+  const totalTracks = tracks.length;
 
   setExportProgress(0, "Preparing audio");
   await nextFrame();
 
-  const playlist = [];
+  const playlist = ["#EXTM3U"];
+  const usedTrackFileNames = new Set();
   for (const track of tracks) {
-    const title = effectiveTrackTitle(track.info, track.number);
-    const fileName = `${String(track.number).padStart(2, "0")} - ${sanitizeFileName(title)}.wav`;
+    const title = cleanExportText(effectiveTrackTitle(track.info, track.number), `Track ${String(track.number).padStart(2, "0")}`);
+    const artist = trackArtistForExport(track.info);
+    const fileName = uniqueTrackFileName(title, usedTrackFileNames);
     const skipRanges = cropSettings.enabled
       ? detectLongSilenceRanges(track.side.audioBuffer, cropSettings, track.segment.start, track.segment.end)
       : [];
@@ -1133,10 +1142,12 @@ async function exportAlbumZip() {
       skipRanges,
       gainLinear: dom.matchLoudnessInput.checked && !options.normalize
         ? masteringGainForTrack(track.side.audioBuffer, track.segment.start, track.segment.end)
-        : 1
+        : 1,
+      metadata: trackMetadataForExport(track, title, totalTracks)
     };
     const wav = encodeSegmentToWav(track.side.audioBuffer, track.segment.start, track.segment.end, trackOptions);
     entries.push({ path: `${folder}/${fileName}`, data: wav });
+    playlist.push(`#EXTINF:${Math.max(0, Math.round(track.segment.end - track.segment.start))},${artist} - ${title}`);
     playlist.push(fileName);
     completed += 1;
     const cropText = trackCropSummary.removedSeconds > 0
@@ -1159,9 +1170,14 @@ async function exportAlbumZip() {
   }
 
   if (dom.originalsInput.checked) {
-    for (const side of recordedSides()) {
+    const sides = recordedSides();
+    for (const side of sides) {
       const originalBuffer = side.originalAudioBuffer || side.audioBuffer;
-      const wav = encodeAudioBufferToWav(originalBuffer, { fadeInMilliseconds: 0, fadeOutMilliseconds: 0 });
+      const wav = encodeAudioBufferToWav(originalBuffer, {
+        fadeInMilliseconds: 0,
+        fadeOutMilliseconds: 0,
+        metadata: originalSideMetadataForExport(side, sides.length)
+      });
       entries.push({ path: `${folder}/Original Recordings/Side ${side.label}.wav`, data: wav });
       completed += 1;
       setExportProgress(completed / totalSteps, `Added Side ${side.label} original`);
@@ -1183,6 +1199,78 @@ async function exportAlbumZip() {
     : "";
   setExportProgress(1, `Exported ${tracks.length} tracks${cropText}`);
   setStatus(`Exported ${albumName}.zip${cropText}`);
+}
+
+function trackMetadataForExport(track, title, totalTracks) {
+  return {
+    title,
+    artist: trackArtistForExport(track.info),
+    albumTitle: albumTitleForExport(),
+    albumArtist: albumArtistForExport(),
+    year: state.project.year || "",
+    genre: state.project.genre,
+    trackNumber: track.number,
+    trackTotal: totalTracks,
+    discNumber: state.project.discNumber || 1,
+    discTotal: state.project.discTotal || 1,
+    artwork: artworkForExport()
+  };
+}
+
+function uniqueTrackFileName(title, usedFileNames) {
+  const baseName = sanitizeFileName(title, "Untitled Track");
+  let fileName = `${baseName}.wav`;
+  let duplicateNumber = 2;
+  while (usedFileNames.has(fileName.toLowerCase())) {
+    fileName = `${baseName} (${duplicateNumber}).wav`;
+    duplicateNumber += 1;
+  }
+  usedFileNames.add(fileName.toLowerCase());
+  return fileName;
+}
+
+function originalSideMetadataForExport(side, totalSides) {
+  const sideNumber = Math.max(1, SIDE_LABELS.indexOf(side.label) + 1);
+  return {
+    title: `Side ${side.label} Original Recording`,
+    artist: albumArtistForExport(),
+    albumTitle: `${albumTitleForExport()} (Original Recordings)`,
+    albumArtist: albumArtistForExport(),
+    year: state.project.year || "",
+    genre: state.project.genre,
+    trackNumber: sideNumber,
+    trackTotal: totalSides,
+    discNumber: state.project.discNumber || 1,
+    discTotal: state.project.discTotal || 1,
+    artwork: artworkForExport()
+  };
+}
+
+function trackArtistForExport(info) {
+  return cleanExportText(info?.artist, albumArtistForExport());
+}
+
+function albumTitleForExport() {
+  return cleanExportText(state.project.albumTitle, "Untitled Album");
+}
+
+function albumArtistForExport() {
+  return cleanExportText(state.project.albumArtist, "Unknown Artist");
+}
+
+function artworkForExport() {
+  return state.project.artwork?.bytes
+    ? {
+        name: state.project.artwork.name,
+        type: state.project.artwork.type,
+        bytes: state.project.artwork.bytes
+      }
+    : null;
+}
+
+function cleanExportText(value, fallback = "") {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text || fallback;
 }
 
 function saveProjectFile() {
@@ -1719,7 +1807,7 @@ function renderProblems(stats) {
     problems.push("Peaks are above -3 dBFS.");
   }
   if (stats.hum_detected) problems.push("Excessive 60 Hz hum detected.");
-  if (stats.stereo_status === "mono") problems.push("Input appears mono or dual-mono.");
+  if (stats.stereo_status === "mono") problems.push("Input is mono or dual-mono; check stereo input mode.");
   if (stats.stereo_status === "imbalance" || stats.stereo_status === "severe_imbalance") problems.push("Channel imbalance detected.");
   if (stats.stereo_status === "disconnected") problems.push("One RCA channel appears disconnected.");
   if (stats.dc_offset_detected) problems.push("DC offset detected.");
@@ -1837,6 +1925,7 @@ function generateProblemSummary(stats) {
   if ((stats.clipping_count || 0) > 0) return "Clipping";
   if (stats.hum_detected) return "Hum detected";
   if (stats.stereo_status === "disconnected") return "Channel disconnected";
+  if (stats.stereo_status === "mono") return "Mono input";
   if (stats.stereo_status === "imbalance" || stats.stereo_status === "severe_imbalance") return "Imbalance";
   if (stats.dc_offset_detected) return "DC offset";
   return "Recording cleanly";

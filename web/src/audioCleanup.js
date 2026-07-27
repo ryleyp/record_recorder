@@ -71,6 +71,15 @@ export function analyzeImportChannelData(channelData, sampleRate) {
   const balanceDB = channels.length >= 2
     ? dbFromPeak(rmsValues[0]) - dbFromPeak(rmsValues[1])
     : null;
+  const leftDB = channels.length >= 2 ? dbFromPeak(rmsValues[0]) : null;
+  const rightDB = channels.length >= 2 ? dbFromPeak(rmsValues[1]) : null;
+  const activeLeft = typeof leftDB === "number" && leftDB > -65;
+  const activeRight = typeof rightDB === "number" && rightDB > -65;
+  const disconnectedChannel = activeLeft && !activeRight
+    ? "R"
+    : !activeLeft && activeRight
+      ? "L"
+      : null;
   const maxDCOffset = dcOffsets.reduce((max, value) => Math.max(max, Math.abs(value)), 0);
   const clickCandidates = detectClickPopCandidates(channels);
   const noiseProfile = estimateSurfaceNoiseProfile(channels, sampleRate);
@@ -83,7 +92,8 @@ export function analyzeImportChannelData(channelData, sampleRate) {
     dc_offset: maxDCOffset,
     dc_offset_detected: maxDCOffset > 0.01,
     stereo_balance_db: balanceDB,
-    channel_imbalance_detected: typeof balanceDB === "number" && Math.abs(balanceDB) > 1.5,
+    disconnected_channel: disconnectedChannel,
+    channel_imbalance_detected: !disconnectedChannel && typeof balanceDB === "number" && Math.abs(balanceDB) > 1.5,
     click_pop_candidates: clickCandidates,
     noise_floor_dbfs: noiseProfile.noise_floor_dbfs,
     noise_floor_rating: noiseProfile.noise_floor_rating,
@@ -102,6 +112,9 @@ export function generateImportOptimizationRecommendations(analysis = {}) {
   }
   if (analysis.rumble_filter_recommended) {
     recommendations.push("Apply 28 Hz rumble filter");
+  }
+  if (analysis.disconnected_channel) {
+    recommendations.push(`Repair missing ${analysis.disconnected_channel} channel`);
   }
   if (analysis.channel_imbalance_detected) {
     recommendations.push("Balance stereo channels");
@@ -186,9 +199,14 @@ export function optimizeImportChannelData(channelData, sampleRate, options = def
   }
 
   if (mergedOptions.balanceChannels && channels.length >= 2) {
-    const balanced = balanceStereoChannels(channels);
-    if (balanced) {
-      applied.push("Stereo balance correction");
+    const repairedChannel = repairMissingStereoChannel(channels);
+    if (repairedChannel) {
+      applied.push(`Repair missing ${repairedChannel} channel`);
+    } else {
+      const balanced = balanceStereoChannels(channels);
+      if (balanced) {
+        applied.push("Stereo balance correction");
+      }
     }
   }
 
@@ -286,6 +304,22 @@ function balanceStereoChannels(channels) {
   applyGain(channels[0], clamp(target / leftRms, 0.5, 2.0));
   applyGain(channels[1], clamp(target / rightRms, 0.5, 2.0));
   return true;
+}
+
+function repairMissingStereoChannel(channels) {
+  const leftRms = rms(channels[0]);
+  const rightRms = rms(channels[1]);
+  const leftActive = dbFromPeak(leftRms) > -65;
+  const rightActive = dbFromPeak(rightRms) > -65;
+  if (leftActive && !rightActive) {
+    channels[1] = new Float32Array(channels[0]);
+    return "R";
+  }
+  if (!leftActive && rightActive) {
+    channels[0] = new Float32Array(channels[1]);
+    return "L";
+  }
+  return null;
 }
 
 function gentleDeClick(channel) {

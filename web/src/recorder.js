@@ -10,9 +10,9 @@ function createAudioContext() {
   return new AudioContextConstructor();
 }
 
-function audioInputConstraints(deviceId = "") {
+function audioInputConstraints(deviceId = "", options = {}) {
   const audio = {
-    channelCount: { ideal: 2 },
+    channelCount: options.requireStereo ? { exact: 2 } : { ideal: 2 },
     echoCancellation: false,
     noiseSuppression: false,
     autoGainControl: false
@@ -21,6 +21,52 @@ function audioInputConstraints(deviceId = "") {
     audio.deviceId = { exact: deviceId };
   }
   return audio;
+}
+
+async function getAudioInputStream(deviceId = "") {
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: audioInputConstraints(deviceId, { requireStereo: true }),
+      video: false
+    });
+  } catch (error) {
+    if (!isStereoConstraintError(error)) throw error;
+    return navigator.mediaDevices.getUserMedia({
+      audio: audioInputConstraints(deviceId),
+      video: false
+    });
+  }
+}
+
+function isStereoConstraintError(error) {
+  return error?.name === "OverconstrainedError"
+    || error?.name === "ConstraintNotSatisfiedError"
+    || error?.constraint === "channelCount";
+}
+
+function streamChannelCount(stream) {
+  const count = stream?.getAudioTracks?.()[0]?.getSettings?.().channelCount;
+  return Number.isFinite(count) && count > 0 ? Math.min(2, count) : 2;
+}
+
+function frameChannelsFromInput(input) {
+  const inputChannelCount = Math.max(1, Math.min(2, input.numberOfChannels || 1));
+  const first = new Float32Array(input.getChannelData(0));
+  if (inputChannelCount === 1) {
+    return [first, new Float32Array(first)];
+  }
+  return [first, new Float32Array(input.getChannelData(1))];
+}
+
+function channelPeaksDBFS(channels) {
+  return channels.map((channel) => {
+    let peak = 0;
+    for (let index = 0; index < channel.length; index += 1) {
+      const abs = Math.abs(channel[index]);
+      if (abs > peak) peak = abs;
+    }
+    return dbFromPeak(peak);
+  });
 }
 
 export class BrowserRecorder {
@@ -45,39 +91,25 @@ export class BrowserRecorder {
       throw new Error("Audio recording requires a browser with microphone input support.");
     }
 
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: audioInputConstraints(deviceId),
-      video: false
-    });
+    this.stream = await getAudioInputStream(deviceId);
     this.context = createAudioContext();
     this.sampleRate = this.context.sampleRate;
     this.source = this.context.createMediaStreamSource(this.stream);
-    this.channelCount = Math.min(2, this.source.channelCount || 2);
+    this.channelCount = 2;
     this.channelChunks = Array.from({ length: this.channelCount }, () => []);
-    this.processor = this.context.createScriptProcessor(BUFFER_SIZE, this.channelCount, this.channelCount);
+    this.processor = this.context.createScriptProcessor(BUFFER_SIZE, streamChannelCount(this.stream), this.channelCount);
     this.mute = this.context.createGain();
     this.mute.gain.value = 0;
 
     this.processor.onaudioprocess = (event) => {
       const input = event.inputBuffer;
-      const peaks = [];
+      const channels = frameChannelsFromInput(input);
       for (let channel = 0; channel < this.channelCount; channel += 1) {
-        const sourceData = input.getChannelData(Math.min(channel, input.numberOfChannels - 1));
-        const copy = new Float32Array(sourceData.length);
-        let peak = 0;
-        for (let index = 0; index < sourceData.length; index += 1) {
-          const value = sourceData[index];
-          copy[index] = value;
-          const abs = Math.abs(value);
-          if (abs > peak) peak = abs;
-        }
-        this.channelChunks[channel].push(copy);
-        peaks.push(dbFromPeak(peak));
+        this.channelChunks[channel].push(channels[channel]);
       }
-      if (peaks.length === 1) peaks.push(peaks[0]);
-      this.onMeter(peaks);
+      this.onMeter(channelPeaksDBFS(channels));
       this.onFrame({
-        channels: this.channelChunks.map((chunks) => chunks[chunks.length - 1]),
+        channels,
         sampleRate: this.sampleRate,
         channelCount: this.channelCount
       });
@@ -145,25 +177,17 @@ export class InputMonitor {
       throw new Error("Input monitoring requires a browser with microphone input support.");
     }
 
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: audioInputConstraints(deviceId),
-      video: false
-    });
+    this.stream = await getAudioInputStream(deviceId);
     this.context = createAudioContext();
     this.sampleRate = this.context.sampleRate;
     this.source = this.context.createMediaStreamSource(this.stream);
-    this.channelCount = Math.min(2, this.source.channelCount || 2);
-    this.processor = this.context.createScriptProcessor(BUFFER_SIZE, this.channelCount, this.channelCount);
+    this.channelCount = 2;
+    this.processor = this.context.createScriptProcessor(BUFFER_SIZE, streamChannelCount(this.stream), this.channelCount);
     this.mute = this.context.createGain();
     this.mute.gain.value = 0;
 
     this.processor.onaudioprocess = (event) => {
-      const input = event.inputBuffer;
-      const channels = [];
-      for (let channel = 0; channel < this.channelCount; channel += 1) {
-        const sourceData = input.getChannelData(Math.min(channel, input.numberOfChannels - 1));
-        channels.push(new Float32Array(sourceData));
-      }
+      const channels = frameChannelsFromInput(event.inputBuffer);
       this.onFrame({
         channels,
         sampleRate: this.sampleRate,

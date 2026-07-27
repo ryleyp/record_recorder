@@ -76,6 +76,31 @@ test("generateRecordingRecommendations suggests gain changes", () => {
   assert.ok(recommendations.some((text) => text.includes("Surface noise is elevated")));
 });
 
+test("generateRecordingRecommendations prioritizes missing channel before gain", () => {
+  const recommendations = generateRecordingRecommendations({
+    peak_dbfs: -24,
+    rms_dbfs: -32,
+    dynamic_range: 8,
+    stereo_status: "disconnected",
+    disconnected_channel: "R"
+  });
+
+  assert.ok(recommendations.some((text) => text.includes("One channel is missing")));
+  assert.equal(recommendations.some((text) => text.includes("Increase record player volume")), false);
+});
+
+test("generateRecordingRecommendations does not show percent gain for mono input", () => {
+  const recommendations = generateRecordingRecommendations({
+    peak_dbfs: -24,
+    rms_dbfs: -32,
+    dynamic_range: 8,
+    stereo_status: "mono"
+  });
+
+  assert.ok(recommendations.some((text) => text.includes("receiving mono")));
+  assert.equal(recommendations.some((text) => text.includes("100%")), false);
+});
+
 function sine(sampleRate, frequency, seconds, amplitude) {
   const samples = new Float32Array(sampleRate * seconds);
   for (let index = 0; index < samples.length; index += 1) {

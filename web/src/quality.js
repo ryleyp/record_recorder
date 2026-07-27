@@ -240,8 +240,14 @@ export function generateRecordingRecommendations(stats = {}) {
   ];
   const peak = stats.peak_dbfs ?? -120;
   if (peak < -18) {
-    const increase = Math.round((Math.pow(10, (-10 - peak) / 20) - 1) * 100 / 5) * 5;
-    recommendations.push(`Input level is too low. Increase record player volume by approximately ${clamp(increase, 10, 100)}%.`);
+    if (stats.stereo_status === "disconnected") {
+      recommendations.push("One channel is missing, so the level reading may be misleading. Fix the input cable, adapter, or stereo input mode before changing volume.");
+    } else if (stats.stereo_status === "mono") {
+      recommendations.push("The browser is receiving mono or dual-mono audio. Confirm the input is set to stereo before judging volume; if mono is expected, raise the level until peaks land near -10 dBFS.");
+    } else {
+      const increase = Math.round((Math.pow(10, (-10 - peak) / 20) - 1) * 100 / 5) * 5;
+      recommendations.push(`Input level is too low. Increase record player volume by approximately ${clamp(increase, 10, 100)}%.`);
+    }
   } else if (peak > -3 || (stats.clipping_count ?? 0) > 0) {
     recommendations.push("Input level is too high. Reduce volume and leave more headroom for record pops.");
   } else if (peak > -6) {
@@ -261,7 +267,7 @@ export function generateRecordingRecommendations(stats = {}) {
   } else if (stats.stereo_status === "imbalance" || stats.stereo_status === "severe_imbalance") {
     recommendations.push("Stereo balance is uneven. Check RCA seating and the USB adapter input mode.");
   } else if (stats.stereo_status === "mono") {
-    recommendations.push("Input appears mono or dual-mono. Use a stereo line input adapter if the record source is stereo.");
+    recommendations.push("Input appears mono or dual-mono. Use a stereo input mode or stereo line input adapter if the record source is stereo.");
   }
   if (stats.dc_offset_detected) {
     recommendations.push("DC offset is elevated. Try a different USB audio adapter or input mode.");
