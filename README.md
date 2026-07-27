@@ -1,7 +1,8 @@
 # Vinyl Album Recorder
 
 A browser web app for recording or importing vinyl sides, detecting track
-breaks, editing album metadata, and exporting a ZIP package of WAV tracks.
+breaks, editing album metadata, and exporting a ZIP package of Music-ready
+lossless AIFF tracks.
 
 The app is designed for GitHub Pages: it is static, dependency-free, and runs
 locally in the browser after it loads. No account, backend, database, or build
@@ -63,22 +64,22 @@ If Pages has not been enabled yet:
    speed/pitch drift from the listed runtimes.
 6. Review the waveform and drag trim/cut markers.
 7. Fill in album and track metadata.
-8. Export a ZIP containing tagged WAV tracks, an M3U playlist, artwork,
-   original side WAVs, and `album-project.json`. Export can optionally crop
-   long quiet sections from track WAVs while preserving the untouched side
+8. Export a ZIP containing tagged AIFF tracks, an M3U playlist, artwork,
+   original side AIFFs, and `album-project.json`. Export can optionally crop
+   long quiet sections from track files while preserving the untouched side
    recordings.
 
 ## Browser Notes
 
 - Browser audio decoding varies by browser. WAV, MP3, M4A, and AAC are the
   safest import formats.
-- The web app exports WAV rather than MP3. Each track WAV includes embedded
-  RIFF INFO and ID3v2.3 metadata for the title, artist, album, album artist,
-  year, genre, track number, disc number, and artwork. Track filenames use the
-  song title without a leading number, while embedded track-number tags keep
-  album order when dragged into Apple Music. Optional full side originals are
-  tagged under an "(Original Recordings)" album title so they do not merge into
-  the cleaned track album if imported accidentally.
+- The web app exports lossless AIFF for the track files so Apple Music reads
+  the embedded ID3v2.3 metadata on drag-in. Each track includes title, artist,
+  album, album artist, year, genre, track number, disc number, and artwork.
+  Track filenames use the song title without a leading number, while embedded
+  track-number tags keep album order. Optional full side originals are tagged
+  under an "(Original Recordings)" album title so they do not merge into the
+  cleaned track album if imported accidentally.
   The original macOS app's MP3 export used CoreAudio plus the vendored LAME
   encoder; that native pipeline is not available on GitHub Pages.
 - The Set Levels stage targets vinyl-friendly capture: peaks around -10 dBFS,

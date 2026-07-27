@@ -1,4 +1,4 @@
-const CACHE_NAME = "vinyl-album-recorder-v5";
+const CACHE_NAME = "vinyl-album-recorder-v6";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,6 +6,8 @@ const ASSETS = [
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./src/app.js",
+  "./src/aiff.js",
+  "./src/audioMetadata.js",
   "./src/audioCleanup.js",
   "./src/detection.js",
   "./src/gapListener.js",
@@ -34,12 +36,10 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   event.respondWith(
-    caches.match(event.request).then((cached) =>
-      cached || fetch(event.request).then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return response;
-      })
-    )
+    fetch(event.request).then((response) => {
+      const copy = response.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+      return response;
+    }).catch(() => caches.match(event.request))
   );
 });

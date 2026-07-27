@@ -34,12 +34,12 @@ import {
   listAudioInputs,
   requestAudioInputPermission
 } from "./recorder.js";
+import { encodeAudioBufferToAiff, encodeSegmentToAiff } from "./aiff.js";
 import {
   defaultSilenceCropSettings,
   detectLongSilenceRanges,
   summarizeSilenceCrop
 } from "./silenceCrop.js";
-import { encodeAudioBufferToWav, encodeSegmentToWav } from "./wav.js";
 import { createZip } from "./zip.js";
 import {
   clamp,
@@ -1135,7 +1135,7 @@ async function exportAlbumZip() {
       track.number
     );
     const artist = trackArtistForExport(track.info);
-    const fileName = uniqueTrackFileName(title, usedTrackFileNames);
+    const fileName = uniqueTrackFileName(title, usedTrackFileNames, "aiff");
     const skipRanges = cropSettings.enabled
       ? detectLongSilenceRanges(track.side.audioBuffer, cropSettings, track.segment.start, track.segment.end)
       : [];
@@ -1150,8 +1150,8 @@ async function exportAlbumZip() {
         : 1,
       metadata: trackMetadataForExport(track, title, totalTracks)
     };
-    const wav = encodeSegmentToWav(track.side.audioBuffer, track.segment.start, track.segment.end, trackOptions);
-    entries.push({ path: `${folder}/${fileName}`, data: wav });
+    const aiff = encodeSegmentToAiff(track.side.audioBuffer, track.segment.start, track.segment.end, trackOptions);
+    entries.push({ path: `${folder}/${fileName}`, data: aiff });
     playlist.push(`#EXTINF:${Math.max(0, Math.round(track.segment.end - track.segment.start))},${artist} - ${title}`);
     playlist.push(fileName);
     completed += 1;
@@ -1178,12 +1178,12 @@ async function exportAlbumZip() {
     const sides = recordedSides();
     for (const side of sides) {
       const originalBuffer = side.originalAudioBuffer || side.audioBuffer;
-      const wav = encodeAudioBufferToWav(originalBuffer, {
+      const aiff = encodeAudioBufferToAiff(originalBuffer, {
         fadeInMilliseconds: 0,
         fadeOutMilliseconds: 0,
         metadata: originalSideMetadataForExport(side, sides.length)
       });
-      entries.push({ path: `${folder}/Original Recordings/Side ${side.label}.wav`, data: wav });
+      entries.push({ path: `${folder}/Original Recordings/Side ${side.label}.aiff`, data: aiff });
       completed += 1;
       setExportProgress(completed / totalSteps, `Added Side ${side.label} original`);
       await nextFrame();
@@ -1222,12 +1222,12 @@ function trackMetadataForExport(track, title, totalTracks) {
   };
 }
 
-function uniqueTrackFileName(title, usedFileNames) {
+function uniqueTrackFileName(title, usedFileNames, extension = "wav") {
   const baseName = sanitizeFileName(title, "Untitled Track");
-  let fileName = `${baseName}.wav`;
+  let fileName = `${baseName}.${extension}`;
   let duplicateNumber = 2;
   while (usedFileNames.has(fileName.toLowerCase())) {
-    fileName = `${baseName} (${duplicateNumber}).wav`;
+    fileName = `${baseName} (${duplicateNumber}).${extension}`;
     duplicateNumber += 1;
   }
   usedFileNames.add(fileName.toLowerCase());
@@ -1362,6 +1362,7 @@ function serializeProject() {
     levelCheck: state.project.levelCheck,
     noiseFloor: state.project.noiseFloor,
     exportSettings: {
+      trackAudioFormat: "AIFF",
       normalizePeaks: dom.normalizeInput.checked,
       matchTrackLoudness: dom.matchLoudnessInput.checked,
       cropLongSilence: cropSettings.enabled,
