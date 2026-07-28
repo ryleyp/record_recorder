@@ -23,6 +23,10 @@ Recording from a USB audio input requires a secure browser context. GitHub
 Pages works because it is HTTPS; local `localhost` also works in modern
 browsers.
 
+If the app still shows WAV export after updating, hard-refresh the page or
+open DevTools > Application > Service Workers and unregister the old local
+service worker, then reload `http://localhost:8000`.
+
 ## iPad
 
 Use the GitHub Pages HTTPS version in Safari, then choose Share > Add to Home

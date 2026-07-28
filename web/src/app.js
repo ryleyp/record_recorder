@@ -686,7 +686,7 @@ async function stopRecording() {
     assignAudioToSide(
       sideLabel,
       audioBuffer,
-      `Recorded Side ${sideLabel}.wav`,
+      `Recorded Side ${sideLabel} capture`,
       "liveRecording",
       { gapSummary }
     );
