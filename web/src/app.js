@@ -2118,6 +2118,12 @@ function byId(id) {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
+    let refreshedForUpdate = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (refreshedForUpdate) return;
+      refreshedForUpdate = true;
+      window.location.reload();
+    });
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
 }
