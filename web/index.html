@@ -45,28 +45,28 @@
         <div class="stage-heading">
           <div>
             <h2 id="add-title">Add Music</h2>
-            <p>Record from a USB input, or import side recordings already saved in Files.</p>
+            <p>Import existing side recordings, or continue to Set Levels before recording from a USB input.</p>
           </div>
           <div class="side-summary" id="sideSummaryAdd"></div>
         </div>
 
         <div class="add-grid">
           <section class="tool-panel" aria-labelledby="import-title">
-            <h3 id="import-title">Import Files</h3>
+            <h3 id="import-title">Import</h3>
             <div class="import-grid">
               <label class="file-drop" for="importSideAInput">
-                <span>Existing Side A File</span>
-                <strong id="sideAFileName">Choose from Files</strong>
+                <span>Side A Audio</span>
+                <strong id="sideAFileName">Choose file</strong>
               </label>
-              <input id="importSideAInput" class="visually-hidden" type="file" accept=".wav,.mp3,.m4a,.aac,.flac,.aiff,.aif,.caf,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/aac,audio/flac,audio/aiff,audio/x-aiff,audio/x-caf">
+              <input id="importSideAInput" class="visually-hidden" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.aiff,.aif,.caf">
 
               <label class="file-drop" for="importSideBInput">
-                <span>Existing Side B File</span>
-                <strong id="sideBFileName">Choose from Files</strong>
+                <span>Side B Audio</span>
+                <strong id="sideBFileName">Choose file</strong>
               </label>
-              <input id="importSideBInput" class="visually-hidden" type="file" accept=".wav,.mp3,.m4a,.aac,.flac,.aiff,.aif,.caf,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/aac,audio/flac,audio/aiff,audio/x-aiff,audio/x-caf">
+              <input id="importSideBInput" class="visually-hidden" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.aiff,.aif,.caf">
             </div>
-            <p class="fine-print">For iPad recording, use Record From USB below instead of this file picker.</p>
+            <p class="fine-print">Decoding depends on the browser. WAV, MP3, M4A, and AAC are widely supported.</p>
           </section>
 
           <section class="tool-panel">
@@ -101,7 +101,7 @@
             <p class="fine-print" id="addInputStatus">Select the input source before setting levels or recording.</p>
             <div class="button-row">
               <button type="button" class="primary" data-step-shortcut="levels">Set Levels</button>
-              <button type="button" data-step-shortcut="record">Record From USB</button>
+              <button type="button" data-step-shortcut="record">Record</button>
             </div>
           </section>
 
@@ -475,6 +475,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./src/app.js?v=2026-07-29-ipad-files"></script>
+    <script type="module" src="./src/app.js?v=2026-07-29-ipad-recording"></script>
   </body>
 </html>

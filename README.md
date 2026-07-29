@@ -35,9 +35,6 @@ before opening the app, tap Refresh in Recording Input, allow audio input
 access, and select the source before setting levels or recording. The Record
 page includes iPad Mode and a 10-second preflight that checks stereo input,
 sample rate, level, browser storage, and wake-lock support before a full side.
-If Safari opens a camera/photo picker, you tapped an import/artwork file
-control; use Record From USB on the Add Music or Record page to capture audio
-from the connected input.
 
 ## GitHub Pages
 
