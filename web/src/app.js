@@ -32,6 +32,7 @@ import {
   BrowserRecorder,
   InputMonitor,
   listAudioInputs,
+  recordingSupportInfo,
   requestAudioInputPermission
 } from "./recorder.js";
 import { encodeAudioBufferToAiff, encodeSegmentToAiff } from "./aiff.js";
@@ -59,6 +60,9 @@ const SIDE_LABELS = ["A", "B"];
 const LEVEL_ANALYSIS_SECONDS = 12;
 const NOISE_MEASUREMENT_SECONDS = 5;
 const ROLLING_ANALYSIS_SECONDS = 3;
+const PREFLIGHT_SECONDS = 10;
+const RECORDING_DIAGNOSTIC_INTERVAL_MS = 200;
+const STORAGE_UPDATE_INTERVAL_MS = 2000;
 
 const state = {
   activeStep: "add",
@@ -70,9 +74,16 @@ const state = {
   levelStats: null,
   noiseStats: null,
   recordingRolling: null,
+  recordingAnalysisCollector: null,
   recordingGapListener: null,
   recordingGapSnapshot: null,
   recordingClipCount: 0,
+  recordingLastDiagnosticAt: 0,
+  recordingLastMeterAt: 0,
+  recordingLastStorageAt: 0,
+  recordingWakeLock: null,
+  recordingWakeStatus: "Not active",
+  recordingPreflight: null,
   lastSilenceCropSummary: null,
   inputDevices: [],
   selectedInputDeviceId: "",
@@ -108,6 +119,13 @@ const dom = {
   recordingStorage: byId("recordingStorage"),
   recordingClipCount: byId("recordingClipCount"),
   recordingQualityScore: byId("recordingQualityScore"),
+  ipadModeInput: byId("ipadModeInput"),
+  recordingEngineStatus: byId("recordingEngineStatus"),
+  recordingChannelStatus: byId("recordingChannelStatus"),
+  recordingSampleRateStatus: byId("recordingSampleRateStatus"),
+  recordingWakeStatus: byId("recordingWakeStatus"),
+  recordingPreflightButton: byId("recordingPreflightButton"),
+  recordingPreflightStatus: byId("recordingPreflightStatus"),
   recordingPeakReadout: byId("recordingPeakReadout"),
   recordingRmsReadout: byId("recordingRmsReadout"),
   recordingNoiseFloor: byId("recordingNoiseFloor"),
@@ -206,6 +224,7 @@ const dom = {
   recordInputDialogStatus: byId("recordInputDialogStatus")
 };
 
+initializeRecordingMode();
 bindEvents();
 refreshDevices();
 render();
@@ -269,6 +288,11 @@ function bindEvents() {
   dom.recordSideAButton.addEventListener("click", () => startRecording("A"));
   dom.recordSideBButton.addEventListener("click", () => startRecording("B"));
   dom.stopRecordingButton.addEventListener("click", stopRecording);
+  dom.ipadModeInput.addEventListener("change", () => {
+    renderIpadRecordingStatus();
+    setStatus(dom.ipadModeInput.checked ? "iPad recording mode on" : "iPad recording mode off");
+  });
+  dom.recordingPreflightButton.addEventListener("click", runRecordingPreflight);
   dom.cleanupPresetSelect.addEventListener("change", () => {
     applyCleanupPreset(dom.cleanupPresetSelect.value);
   });
@@ -311,6 +335,30 @@ function bindEvents() {
   dom.waveformCanvas.addEventListener("pointerup", handleWaveformPointerUp);
   dom.waveformCanvas.addEventListener("pointercancel", handleWaveformPointerUp);
   window.addEventListener("resize", () => requestAnimationFrame(drawWaveform));
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+}
+
+function initializeRecordingMode() {
+  dom.ipadModeInput.checked = isLikelyIPad();
+  state.recordingWakeStatus = wakeLockSupported()
+    ? "Available"
+    : "Manual: keep screen awake";
+}
+
+function isLikelyIPad() {
+  const platform = navigator.platform || "";
+  const ua = navigator.userAgent || "";
+  return /iPad/i.test(ua) || (platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function wakeLockSupported() {
+  return Boolean(navigator.wakeLock?.request);
+}
+
+async function handleVisibilityChange() {
+  if (document.visibilityState === "visible" && state.recorder && !state.recordingWakeLock) {
+    await requestRecordingWakeLock();
+  }
 }
 
 function createProject() {
@@ -466,18 +514,27 @@ function renderDialogInputSelectionStatus() {
 
 function configureRecordingInputDialog(sideLabel, mode) {
   const recording = mode === "record";
+  const preflight = mode === "preflight";
   dom.recordInputDialogTitle.textContent = recording
     ? "Select Recording Input"
+    : preflight
+      ? "Select Preflight Input"
     : "Change Recording Input";
   dom.recordInputSideText.textContent = recording
     ? `Side ${sideLabel}`
+    : preflight
+      ? "the preflight test"
     : "the next recording";
   dom.recordInputDialogPrompt.childNodes[0].textContent = "Choose the source for ";
   dom.recordInputDialogPrompt.childNodes[2].textContent = recording
     ? " before recording."
+    : preflight
+      ? "."
     : ".";
   dom.recordInputConfirmButton.textContent = recording
     ? "Start Recording"
+    : preflight
+      ? "Run Preflight"
     : "Use Input";
 }
 
@@ -491,10 +548,14 @@ async function promptForRecordingInput(sideLabel, options = {}) {
   if (typeof dom.recordInputDialog.showModal !== "function") {
     const ok = window.confirm(mode === "record"
       ? `Record Side ${sideLabel} using ${currentInputDeviceLabel()}?`
+      : mode === "preflight"
+        ? `Run preflight using ${currentInputDeviceLabel()}?`
       : `Use ${currentInputDeviceLabel()} for future recordings?`);
     if (!ok) {
       setStatus(mode === "record"
         ? "Recording canceled. Choose the correct input and press Record again."
+        : mode === "preflight"
+          ? "Preflight canceled."
         : "Input change canceled.");
       return null;
     }
@@ -510,6 +571,8 @@ async function promptForRecordingInput(sideLabel, options = {}) {
       }
       setStatus(mode === "record"
         ? "Recording canceled. Choose the correct input and press Record again."
+        : mode === "preflight"
+          ? "Preflight canceled."
         : "Input change canceled.");
       resolve(null);
     };
@@ -527,6 +590,130 @@ async function changeRecordingInput() {
   const deviceId = await promptForRecordingInput(null, { mode: "change" });
   if (deviceId == null) return;
   setStatus(`Recording input set to ${currentInputDeviceLabel()}`);
+}
+
+async function runRecordingPreflight() {
+  if (state.recorder) return;
+  const deviceId = await promptForRecordingInput(null, { mode: "preflight" });
+  if (deviceId == null) return;
+  if (state.monitor) {
+    await stopMonitoring();
+  }
+
+  const label = currentInputDeviceLabel();
+  let collector = null;
+  let monitor = null;
+  let timer = 0;
+  let timeout = 0;
+  let done = false;
+  let resolveDone = null;
+  const complete = () => {
+    if (done) return;
+    done = true;
+    resolveDone?.();
+  };
+  const donePromise = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  try {
+    setStatus("Running 10-second recording preflight");
+    state.recordingPreflight = {
+      status: "running",
+      elapsedSeconds: 0
+    };
+    renderIpadRecordingStatus();
+
+    monitor = new InputMonitor({
+      onFrame(frame) {
+        collector ||= createSampleCollector(frame.sampleRate, frame.channelCount, PREFLIGHT_SECONDS);
+        collector.addFrame(frame.channels);
+        if (collector.frameCount >= collector.sampleRate * PREFLIGHT_SECONDS) {
+          complete();
+        }
+      }
+    });
+    await monitor.start(deviceId);
+    timer = window.setInterval(() => {
+      state.recordingPreflight.elapsedSeconds = Math.min(
+        PREFLIGHT_SECONDS,
+        (state.recordingPreflight.elapsedSeconds || 0) + 0.25
+      );
+      renderIpadRecordingStatus();
+    }, 250);
+    timeout = window.setTimeout(complete, PREFLIGHT_SECONDS * 1000);
+    await donePromise;
+    window.clearInterval(timer);
+    window.clearTimeout(timeout);
+    await monitor.stop();
+
+    if (!collector || collector.frameCount < collector.sampleRate) {
+      throw new Error("Preflight did not capture enough audio. Check iPad input permission and selected source.");
+    }
+
+    const channels = collector.toChannelData();
+    const stats = analyzeInputLevels(channels, collector.sampleRate);
+    const storage = await recordingStorageSummary(collector.sampleRate);
+    const warnings = preflightWarnings(stats, storage);
+    state.recordingPreflight = {
+      status: "complete",
+      ok: warnings.length === 0,
+      inputLabel: label,
+      sampleRate: collector.sampleRate,
+      stereoStatus: preflightStereoStatus(stats),
+      stats,
+      storageText: storage.text,
+      warnings
+    };
+    renderIpadRecordingStatus();
+    setStatus(warnings.length ? "Preflight finished with warnings" : "Preflight passed");
+  } catch (error) {
+    window.clearInterval(timer);
+    window.clearTimeout(timeout);
+    if (monitor) await monitor.stop().catch(() => {});
+    state.recordingPreflight = {
+      status: "complete",
+      ok: false,
+      inputLabel: label,
+      sampleRate: 0,
+      stereoStatus: "Not captured",
+      stats: { peak_dbfs: -120, rms_dbfs: -120 },
+      storageText: "Not checked",
+      warnings: [error.message]
+    };
+    renderIpadRecordingStatus();
+    setStatus(error.message);
+  }
+}
+
+function preflightStereoStatus(stats) {
+  if (stats.stereo_status === "disconnected") return "Missing channel";
+  if (stats.stereo_status === "mono") return "Mono/dual-mono";
+  if (stats.stereo_status === "imbalance" || stats.stereo_status === "severe_imbalance") return "Imbalanced";
+  return "Stereo";
+}
+
+function preflightWarnings(stats, storage) {
+  const warnings = [];
+  if (stats.stereo_status === "disconnected") {
+    warnings.push("One channel is missing");
+  } else if (stats.stereo_status === "mono") {
+    warnings.push("Input is mono or dual-mono");
+  } else if (stats.stereo_status === "severe_imbalance") {
+    warnings.push("Stereo balance is severely uneven");
+  }
+  if ((stats.clipping_count || 0) > 0 || stats.peak_dbfs > -3) {
+    warnings.push("Level is too hot");
+  } else if (stats.peak_dbfs < -24) {
+    warnings.push("Level is very quiet");
+  }
+  if (storage.remainingBytes != null && storage.remainingBytes < storage.recommendedBytes) {
+    warnings.push("Free browser storage is low for a full side");
+  }
+  if (!wakeLockSupported()) {
+    warnings.push("Wake Lock is unavailable; keep the screen open");
+  }
+  return warnings;
 }
 
 async function startMonitoring() {
@@ -641,6 +828,40 @@ function createTimedCapture(type, seconds) {
   };
 }
 
+async function requestRecordingWakeLock() {
+  if (!wakeLockSupported()) {
+    state.recordingWakeStatus = "Manual: keep screen awake";
+    renderIpadRecordingStatus();
+    return null;
+  }
+  try {
+    state.recordingWakeLock = await navigator.wakeLock.request("screen");
+    state.recordingWakeStatus = "Active";
+    state.recordingWakeLock.addEventListener("release", () => {
+      if (state.recordingWakeStatus === "Released") return;
+      state.recordingWakeStatus = state.recorder ? "Released" : "Not active";
+      state.recordingWakeLock = null;
+      renderIpadRecordingStatus();
+    });
+  } catch {
+    state.recordingWakeStatus = "Manual: keep screen awake";
+  }
+  renderIpadRecordingStatus();
+  return state.recordingWakeLock;
+}
+
+async function releaseRecordingWakeLock() {
+  if (state.recordingWakeLock) {
+    const wakeLock = state.recordingWakeLock;
+    state.recordingWakeLock = null;
+    await wakeLock.release().catch(() => {});
+  }
+  state.recordingWakeStatus = wakeLockSupported()
+    ? "Available"
+    : "Manual: keep screen awake";
+  renderIpadRecordingStatus();
+}
+
 async function startRecording(sideLabel) {
   if (state.recorder) return;
   const deviceId = await promptForRecordingInput(sideLabel);
@@ -652,18 +873,20 @@ async function startRecording(sideLabel) {
     setStatus(`Recording Side ${sideLabel}`);
     state.recordingSide = sideLabel;
     state.recordingRolling = null;
+    state.recordingAnalysisCollector = null;
     state.recordingGapListener = createRecordingGapListener({
       noiseFloorDBFS: state.noiseStats?.noise_floor ?? state.project.noiseFloor
     });
     state.recordingGapSnapshot = null;
     state.recordingClipCount = 0;
+    state.recordingLastDiagnosticAt = 0;
+    state.recordingLastMeterAt = 0;
+    state.recordingLastStorageAt = 0;
+    await requestRecordingWakeLock();
     state.recorder = new BrowserRecorder({
       onFrame: handleRecordingFrame,
-      onMeter: updateMeters,
-      onTick: (seconds) => {
-        dom.recordingClock.textContent = formatTime(seconds);
-        updateStorageEstimate();
-      }
+      onMeter: updateRecordingMeters,
+      onTick: handleRecordingTick
     });
     await state.recorder.start(deviceId);
     updateStorageEstimate();
@@ -671,6 +894,7 @@ async function startRecording(sideLabel) {
   } catch (error) {
     state.recorder = null;
     state.recordingSide = null;
+    await releaseRecordingWakeLock();
     renderRecordControls();
     setStatus(error.message);
   }
@@ -698,10 +922,16 @@ async function stopRecording() {
     state.recorder = null;
     state.recordingSide = null;
     state.recordingRolling = null;
+    state.recordingAnalysisCollector = null;
     state.recordingGapListener = null;
     state.recordingGapSnapshot = null;
+    state.recordingLastDiagnosticAt = 0;
+    state.recordingLastMeterAt = 0;
+    state.recordingLastStorageAt = 0;
+    await releaseRecordingWakeLock();
     window.clearInterval(state.storageTimer);
     state.storageTimer = 0;
+    updateMeters([-120, -120]);
     renderRecordControls();
   }
 }
@@ -712,10 +942,25 @@ function handleRecordingFrame(frame) {
     frame.channelCount,
     ROLLING_ANALYSIS_SECONDS
   );
+  state.recordingAnalysisCollector ||= createSampleCollector(
+    frame.sampleRate,
+    frame.channelCount,
+    1
+  );
   state.recordingRolling.addFrame(frame.channels);
-  const frameStats = analyzeInputLevels(frame.channels, frame.sampleRate);
+  state.recordingAnalysisCollector.addFrame(frame.channels);
+  state.recordingClipCount += frame.clippingCount || 0;
+
+  const now = performance.now();
+  if (now - state.recordingLastDiagnosticAt < RECORDING_DIAGNOSTIC_INTERVAL_MS) {
+    return;
+  }
+  state.recordingLastDiagnosticAt = now;
+
+  const analysisChannels = state.recordingAnalysisCollector.toChannelData();
+  state.recordingAnalysisCollector = createSampleCollector(frame.sampleRate, frame.channelCount, 1);
+  const frameStats = analyzeInputLevels(analysisChannels, frame.sampleRate);
   const rollingStats = analyzeInputLevels(state.recordingRolling.toChannelData(), frame.sampleRate);
-  state.recordingClipCount += frameStats.clipping_count;
   const liveStats = {
     ...frameStats,
     clipping_count: state.recordingClipCount,
@@ -723,7 +968,7 @@ function handleRecordingFrame(frame) {
     noise_floor: state.noiseStats?.noise_floor ?? state.project.noiseFloor
   };
   if (state.recordingGapListener) {
-    const frameSeconds = (frame.channels[0]?.length || 0) / frame.sampleRate;
+    const frameSeconds = (analysisChannels[0]?.length || 0) / frame.sampleRate;
     state.recordingGapSnapshot = updateRecordingGapListener(
       state.recordingGapListener,
       liveStats,
@@ -732,6 +977,21 @@ function handleRecordingFrame(frame) {
     liveStats.gap_listener = state.recordingGapSnapshot;
   }
   renderRecordingDiagnostics(liveStats);
+}
+
+function updateRecordingMeters(peaksDBFS) {
+  const now = performance.now();
+  if (now - state.recordingLastMeterAt < RECORDING_DIAGNOSTIC_INTERVAL_MS) return;
+  state.recordingLastMeterAt = now;
+  updateMeters(peaksDBFS);
+}
+
+function handleRecordingTick(seconds) {
+  dom.recordingClock.textContent = formatTime(seconds);
+  const now = performance.now();
+  if (now - state.recordingLastStorageAt < STORAGE_UPDATE_INTERVAL_MS) return;
+  state.recordingLastStorageAt = now;
+  updateStorageEstimate();
 }
 
 async function importSideFile(sideLabel, file) {
@@ -1429,6 +1689,7 @@ function render() {
   renderTrackViews();
   renderSilenceCropStatus();
   renderRecordingInputStatus();
+  renderIpadRecordingStatus();
   requestAnimationFrame(drawWaveform);
 }
 
@@ -1455,10 +1716,49 @@ function renderRecordControls() {
   dom.recordInputDeviceSelect.disabled = recording;
   dom.recordChangeInputButton.disabled = recording;
   dom.recordRefreshDevicesButton.disabled = recording;
+  dom.recordingPreflightButton.disabled = recording;
+  dom.ipadModeInput.disabled = recording;
   if (!recording) {
     dom.recordingClock.textContent = "00:00";
     renderRecordingGapStatus(null);
   }
+  renderIpadRecordingStatus();
+}
+
+function renderIpadRecordingStatus() {
+  const support = recordingSupportInfo();
+  const engine = state.recorder?.captureEngine
+    || (support.audioWorklet ? "AudioWorklet ready" : "ScriptProcessor fallback");
+  const storage = state.recorder?.storageMode
+    || (support.indexedDB ? "IndexedDB chunks ready" : "Memory chunks");
+  dom.recordingEngineStatus.textContent = `${engine}; ${storage}`;
+  dom.recordingWakeStatus.textContent = state.recordingWakeStatus;
+
+  if (state.recordingPreflight?.status === "running") {
+    const elapsed = state.recordingPreflight.elapsedSeconds || 0;
+    dom.recordingPreflightStatus.innerHTML = `<strong>Preflight running</strong><span>${formatTime(elapsed)} / ${formatTime(PREFLIGHT_SECONDS)}. Play the loudest section you expect to record.</span>`;
+    return;
+  }
+
+  if (!state.recordingPreflight) {
+    dom.recordingChannelStatus.textContent = "Not tested";
+    dom.recordingSampleRateStatus.textContent = "Not tested";
+    dom.recordingPreflightStatus.innerHTML = "<strong>Ready for preflight</strong><span>Connect the USB turntable or interface, then test stereo, level, storage, and iPad readiness.</span>";
+    return;
+  }
+
+  const result = state.recordingPreflight;
+  dom.recordingChannelStatus.textContent = result.stereoStatus;
+  dom.recordingSampleRateStatus.textContent = `${Math.round(result.sampleRate || 0).toLocaleString()} Hz`;
+  const heading = result.ok ? "Preflight passed" : "Check setup before recording";
+  const details = [
+    `Input: ${result.inputLabel}`,
+    `Peak ${formatDB(result.stats.peak_dbfs)}`,
+    `RMS ${formatDB(result.stats.rms_dbfs)}`,
+    `Storage ${result.storageText}`,
+    ...result.warnings
+  ].join(". ");
+  dom.recordingPreflightStatus.innerHTML = `<strong>${escapeHTML(heading)}</strong><span>${escapeHTML(details)}.</span>`;
 }
 
 function renderDetectionSettings() {
@@ -1861,17 +2161,33 @@ function renderRecordingGapStatus(gap) {
 }
 
 async function updateStorageEstimate() {
+  const storage = await recordingStorageSummary(state.recorder?.sampleRate || 48000);
+  dom.recordingStorage.textContent = storage.text;
+}
+
+async function recordingStorageSummary(sampleRate) {
+  const recommendedBytes = Math.round((sampleRate || 48000) * 2 * 4 * 30 * 60);
   if (!navigator.storage?.estimate) {
-    dom.recordingStorage.textContent = "Not reported";
-    return;
+    return {
+      text: "Not reported",
+      remainingBytes: null,
+      recommendedBytes
+    };
   }
   const estimate = await navigator.storage.estimate();
   if (!estimate.quota) {
-    dom.recordingStorage.textContent = "Not reported";
-    return;
+    return {
+      text: "Not reported",
+      remainingBytes: null,
+      recommendedBytes
+    };
   }
-  const remaining = Math.max(0, estimate.quota - (estimate.usage || 0));
-  dom.recordingStorage.textContent = formatBytes(remaining);
+  const remainingBytes = Math.max(0, estimate.quota - (estimate.usage || 0));
+  return {
+    text: formatBytes(remainingBytes),
+    remainingBytes,
+    recommendedBytes
+  };
 }
 
 function createSampleCollector(sampleRate, channelCount, maxSeconds = null) {

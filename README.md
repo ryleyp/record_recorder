@@ -32,7 +32,9 @@ service worker, then reload `http://localhost:8000`.
 Use the GitHub Pages HTTPS version in Safari, then choose Share > Add to Home
 Screen for the app-like version. Connect the USB turntable or audio interface
 before opening the app, tap Refresh in Recording Input, allow audio input
-access, and select the source before setting levels or recording.
+access, and select the source before setting levels or recording. The Record
+page includes iPad Mode and a 10-second preflight that checks stereo input,
+sample rate, level, browser storage, and wake-lock support before a full side.
 
 ## GitHub Pages
 
@@ -58,8 +60,10 @@ If Pages has not been enabled yet:
    section analysis, 5-second surface-noise measurement, automatic problem
    detection, and a 0-100 recording quality score.
 3. Record Side A/Side B in the browser as lossless audio. During recording,
-   the app listens for lead-in silence and long quiet run-out/flip gaps, then
-   suggests start/end trims while preserving the full original capture.
+   the app uses AudioWorklet capture when available, stores one-second chunks
+   in IndexedDB where supported, throttles live diagnostics for iPad stability,
+   and listens for lead-in silence and long quiet run-out/flip gaps while
+   preserving the full original capture.
 4. Run track detection with the conservative, balanced, or aggressive preset.
 5. Optionally paste a tracklist with runtimes or import Audacity label text.
    Runtime-guided splitting scales the listed runtimes to the actual side,

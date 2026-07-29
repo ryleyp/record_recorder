@@ -252,6 +252,22 @@
           </section>
 
           <section class="tool-panel">
+            <h3>iPad Mode</h3>
+            <label class="check-row"><input id="ipadModeInput" type="checkbox"> Optimize long recordings on iPad</label>
+            <div class="stats-grid">
+              <div><span>Capture engine</span><strong id="recordingEngineStatus">Checking...</strong></div>
+              <div><span>Input channels</span><strong id="recordingChannelStatus">Not tested</strong></div>
+              <div><span>Sample rate</span><strong id="recordingSampleRateStatus">Not tested</strong></div>
+              <div><span>Wake lock</span><strong id="recordingWakeStatus">Not active</strong></div>
+            </div>
+            <button id="recordingPreflightButton" type="button">Run 10s Preflight</button>
+            <div class="noise-card" id="recordingPreflightStatus">
+              <strong>Ready for preflight</strong>
+              <span>Connect the USB turntable or interface, then test stereo, level, storage, and iPad readiness.</span>
+            </div>
+          </section>
+
+          <section class="tool-panel">
             <h3>Live Stats</h3>
             <div class="stats-grid">
               <div><span>Peak L/R</span><strong id="recordingPeakReadout">-inf / -inf dBFS</strong></div>
@@ -459,6 +475,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./src/app.js?v=2026-07-29-aiff-pages"></script>
+    <script type="module" src="./src/app.js?v=2026-07-29-ipad-recording"></script>
   </body>
 </html>
