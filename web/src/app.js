@@ -1704,8 +1704,8 @@ function renderSummaries() {
   dom.sideSummaryRecord.innerHTML = html;
   dom.sideSummaryDetails.innerHTML = html;
   dom.sideSummaryExport.innerHTML = html;
-  dom.sideAFileName.textContent = sideFor("A").sourceName || "Choose file";
-  dom.sideBFileName.textContent = sideFor("B").sourceName || "Choose file";
+  dom.sideAFileName.textContent = sideFor("A").sourceName || "Choose from Files";
+  dom.sideBFileName.textContent = sideFor("B").sourceName || "Choose from Files";
 }
 
 function renderRecordControls() {
